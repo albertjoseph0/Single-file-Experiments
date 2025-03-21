@@ -1,0 +1,826 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>3D Multiplayer Tic Tac Toe</title>
+    <style>
+        body {
+            margin: 0;
+            padding: 0;
+            overflow: hidden;
+            font-family: 'Arial', sans-serif;
+            background: linear-gradient(135deg, #1a1a2e, #16213e);
+            color: #fff;
+        }
+
+        #game-container {
+            position: relative;
+            width: 100vw;
+            height: 100vh;
+        }
+
+        #canvas {
+            position: absolute;
+            top: 0;
+            left: 0;
+            z-index: 1;
+        }
+
+        #ui-container {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            z-index: 2;
+            pointer-events: none;
+            display: flex;
+            flex-direction: column;
+            justify-content: space-between;
+            padding: 20px;
+            box-sizing: border-box;
+        }
+
+        .panel {
+            background-color: rgba(0, 0, 0, 0.6);
+            border-radius: 10px;
+            padding: 20px;
+            max-width: 400px;
+            margin: 10px;
+            pointer-events: auto;
+            box-shadow: 0 4px 8px rgba(0, 0, 0, 0.3);
+        }
+
+        .top-panel {
+            align-self: center;
+        }
+
+        .bottom-panel {
+            align-self: center;
+            text-align: center;
+        }
+
+        .side-panel {
+            align-self: flex-start;
+        }
+
+        h1, h2 {
+            margin: 0 0 15px 0;
+            text-align: center;
+            color: #4cc9f0;
+        }
+
+        button {
+            background-color: #4361ee;
+            color: white;
+            border: none;
+            padding: 10px 15px;
+            margin: 5px;
+            border-radius: 5px;
+            cursor: pointer;
+            font-weight: bold;
+            transition: background-color 0.3s;
+        }
+
+        button:hover {
+            background-color: #3a0ca3;
+        }
+
+        button:disabled {
+            background-color: #666;
+            cursor: not-allowed;
+        }
+
+        input {
+            padding: 10px;
+            margin: 5px 0;
+            border-radius: 5px;
+            border: none;
+            width: 100%;
+            box-sizing: border-box;
+        }
+
+        #game-id {
+            font-family: monospace;
+            padding: 8px;
+            background-color: rgba(255, 255, 255, 0.1);
+            border-radius: 4px;
+            margin: 10px 0;
+            word-break: break-all;
+        }
+
+        #status {
+            font-weight: bold;
+            margin: 10px 0;
+            color: #f72585;
+        }
+
+        .hidden {
+            display: none;
+        }
+
+        #instructions {
+            margin-top: 20px;
+            font-size: 0.9rem;
+            text-align: left;
+        }
+
+        #turn-indicator {
+            font-size: 1.2rem;
+            font-weight: bold;
+            color: #4cc9f0;
+            margin: 10px 0;
+        }
+
+        #loading {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background-color: rgba(0, 0, 0, 0.8);
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            z-index: 999;
+        }
+
+        .spinner {
+            width: 50px;
+            height: 50px;
+            border: 5px solid rgba(255, 255, 255, 0.3);
+            border-radius: 50%;
+            border-top-color: #4cc9f0;
+            animation: spin 1s ease-in-out infinite;
+        }
+
+        @keyframes spin {
+            to { transform: rotate(360deg); }
+        }
+    </style>
+</head>
+<body>
+    <div id="loading">
+        <div class="spinner"></div>
+    </div>
+
+    <div id="game-container">
+        <canvas id="canvas"></canvas>
+        
+        <div id="ui-container">
+            <div class="panel top-panel">
+                <h1>3D Multiplayer Tic Tac Toe</h1>
+                <div id="turn-indicator" class="hidden">Your turn!</div>
+            </div>
+            
+            <div class="panel side-panel" id="connection-panel">
+                <h2>Connection Setup</h2>
+                <div id="mode-selection">
+                    <button id="single-player">Single Player Mode</button>
+                </div>
+                <hr style="border-color: rgba(255, 255, 255, 0.2); margin: 15px 0;">
+                <div id="host-section">
+                    <button id="create-game">Create New Game</button>
+                    <div id="host-info" class="hidden">
+                        <p>Share this game ID with your opponent:</p>
+                        <div id="game-id"></div>
+                        <button id="copy-id">Copy ID</button>
+                    </div>
+                </div>
+                <div id="join-section">
+                    <p>Or join an existing game:</p>
+                    <input type="text" id="join-id" placeholder="Enter game ID">
+                    <button id="join-game">Join Game</button>
+                </div>
+                <div id="status"></div>
+            </div>
+            
+            <div class="panel bottom-panel">
+                <button id="restart" class="hidden">Restart Game</button>
+                <div id="instructions">
+                    <p><strong>How to play:</strong></p>
+                    <ol>
+                        <li>Create a new game or join an existing one.</li>
+                        <li>The creator plays as X, the joiner plays as O.</li>
+                        <li>Click on a cell to make your move when it's your turn.</li>
+                        <li>Get three in a row (horizontally, vertically, or diagonally) to win!</li>
+                    </ol>
+                    <p><strong>Controls:</strong> Drag to rotate the board. Scroll to zoom.</p>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Load external libraries via CDN -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+    <script src="https://unpkg.com/peerjs@1.4.7/dist/peerjs.min.js"></script>
+
+    <script>
+        // Wait for all resources to load before initializing
+        window.addEventListener('load', () => {
+            // ========================
+            // Game Variables
+            // ========================
+            let peer;
+            let conn;
+            let gameId;
+            let isHost = false;
+            let currentPlayer = 'X';  // X always starts
+            let mySymbol = null;
+            let gameActive = false;
+            let gameState = ['', '', '', '', '', '', '', '', ''];
+            let isSinglePlayerMode = false;
+            let winCombinations = [
+                [0, 1, 2], [3, 4, 5], [6, 7, 8],  // Rows
+                [0, 3, 6], [1, 4, 7], [2, 5, 8],  // Columns
+                [0, 4, 8], [2, 4, 6]              // Diagonals
+            ];
+
+            // ========================
+            // Three.js Setup
+            // ========================
+            const scene = new THREE.Scene();
+            const camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
+            const renderer = new THREE.WebGLRenderer({ canvas: document.getElementById('canvas'), antialias: true });
+            renderer.setSize(window.innerWidth, window.innerHeight);
+            renderer.setClearColor(0x000000, 0);
+
+            // Add ambient light
+            const ambientLight = new THREE.AmbientLight(0xffffff, 0.5);
+            scene.add(ambientLight);
+
+            // Add directional light
+            const directionalLight = new THREE.DirectionalLight(0xffffff, 0.8);
+            directionalLight.position.set(5, 10, 7);
+            scene.add(directionalLight);
+
+            // Camera position
+            camera.position.z = 8;
+
+            // Game board
+            const boardGroup = new THREE.Group();
+            scene.add(boardGroup);
+
+            // Create board grid
+            const gridMaterial = new THREE.LineBasicMaterial({ color: 0x4cc9f0, linewidth: 2 });
+            const gridGeometry = new THREE.BufferGeometry();
+            
+            // Grid lines
+            const vertices = [];
+            // Vertical lines
+            vertices.push(-1.5, -4.5, 0, -1.5, 4.5, 0);
+            vertices.push(0, -4.5, 0, 0, 4.5, 0);
+            vertices.push(1.5, -4.5, 0, 1.5, 4.5, 0);
+            // Horizontal lines
+            vertices.push(-4.5, -1.5, 0, 4.5, -1.5, 0);
+            vertices.push(-4.5, 0, 0, 4.5, 0, 0);
+            vertices.push(-4.5, 1.5, 0, 4.5, 1.5, 0);
+            
+            gridGeometry.setAttribute('position', new THREE.Float32BufferAttribute(vertices, 3));
+            const grid = new THREE.LineSegments(gridGeometry, gridMaterial);
+            boardGroup.add(grid);
+
+            // Board background
+            const boardGeometry = new THREE.PlaneGeometry(6, 6);
+            const boardMaterial = new THREE.MeshBasicMaterial({ 
+                color: 0x16213e,
+                transparent: true,
+                opacity: 0.7,
+                side: THREE.DoubleSide
+            });
+            const board = new THREE.Mesh(boardGeometry, boardMaterial);
+            board.position.z = -0.1;
+            boardGroup.add(board);
+
+            // Cell positions (center of each cell)
+            const cellPositions = [
+                [-3, 3, 0], [0, 3, 0], [3, 3, 0],
+                [-3, 0, 0], [0, 0, 0], [3, 0, 0],
+                [-3, -3, 0], [0, -3, 0], [3, -3, 0]
+            ];
+
+            // Cell meshes for interaction
+            const cells = [];
+            const cellGeometry = new THREE.PlaneGeometry(2.9, 2.9);
+            const cellMaterial = new THREE.MeshBasicMaterial({ 
+                color: 0xffffff, 
+                transparent: true, 
+                opacity: 0.01,
+                side: THREE.DoubleSide
+            });
+
+            for (let i = 0; i < 9; i++) {
+                const cell = new THREE.Mesh(cellGeometry, cellMaterial.clone());
+                cell.position.set(cellPositions[i][0], cellPositions[i][1], 0);
+                cell.userData = { index: i };
+                cells.push(cell);
+                boardGroup.add(cell);
+            }
+
+            // Create X and O models
+            function createXModel() {
+                const group = new THREE.Group();
+                
+                // Create two crossed bars
+                const geometry = new THREE.BoxGeometry(0.5, 2.5, 0.5);
+                const material = new THREE.MeshPhongMaterial({ color: 0xf72585 });
+                
+                const bar1 = new THREE.Mesh(geometry, material);
+                bar1.rotation.z = Math.PI / 4;
+                group.add(bar1);
+                
+                const bar2 = new THREE.Mesh(geometry, material);
+                bar2.rotation.z = -Math.PI / 4;
+                group.add(bar2);
+                
+                return group;
+            }
+
+            function createOModel() {
+                const geometry = new THREE.TorusGeometry(1, 0.3, 16, 32);
+                const material = new THREE.MeshPhongMaterial({ color: 0x4361ee });
+                return new THREE.Mesh(geometry, material);
+            }
+
+            // ========================
+            // Game Board Interaction
+            // ========================
+            
+            // Raycasting for cell selection
+            const raycaster = new THREE.Raycaster();
+            const mouse = new THREE.Vector2();
+
+            // Handle mouse click events
+            window.addEventListener('click', (event) => {
+                if (!gameActive) return;
+                
+                // Allow player to make moves in single player mode regardless of current player
+                if (!isSinglePlayerMode && mySymbol !== currentPlayer) return;
+
+                // Calculate mouse position in normalized device coordinates
+                mouse.x = (event.clientX / window.innerWidth) * 2 - 1;
+                mouse.y = -(event.clientY / window.innerHeight) * 2 + 1;
+
+                // Update the picking ray with the camera and mouse position
+                raycaster.setFromCamera(mouse, camera);
+
+                // Calculate objects intersecting the picking ray
+                const intersects = raycaster.intersectObjects(cells);
+
+                if (intersects.length > 0) {
+                    const selectedCell = intersects[0].object;
+                    const cellIndex = selectedCell.userData.index;
+                    
+                    // Check if the cell is empty
+                    if (gameState[cellIndex] === '') {
+                        makeMove(cellIndex);
+                    }
+                }
+            });
+
+            // Make a move
+            function makeMove(cellIndex) {
+                // Update game state
+                gameState[cellIndex] = currentPlayer;
+                
+                // Place the piece in 3D space
+                placePiece(cellIndex, currentPlayer);
+                
+                // Check if the game is over
+                if (checkWinner()) {
+                    if (isSinglePlayerMode) {
+                        updateStatus(`Game over! ${currentPlayer} wins!`);
+                    } else {
+                        updateStatus(`Player ${currentPlayer} wins!`);
+                    }
+                    gameActive = false;
+                    document.getElementById('restart').classList.remove('hidden');
+                } else if (gameState.every(cell => cell !== '')) {
+                    updateStatus("It's a draw!");
+                    gameActive = false;
+                    document.getElementById('restart').classList.remove('hidden');
+                } else {
+                    // Switch player
+                    currentPlayer = currentPlayer === 'X' ? 'O' : 'X';
+                    updateTurnIndicator();
+                }
+                
+                // Send the move to the peer
+                if (conn) {
+                    conn.send({
+                        type: 'move',
+                        index: cellIndex,
+                        gameState: gameState,
+                        currentPlayer: currentPlayer
+                    });
+                }
+            }
+
+            // Place a piece on the board in 3D
+            function placePiece(cellIndex, player) {
+                const position = cellPositions[cellIndex];
+                let piece;
+                
+                if (player === 'X') {
+                    piece = createXModel();
+                } else {
+                    piece = createOModel();
+                }
+                
+                piece.position.set(position[0], position[1], 0);
+                
+                // Add animation effect
+                piece.scale.set(0, 0, 0);
+                boardGroup.add(piece);
+                
+                // Animate the piece
+                animatePiece(piece);
+            }
+
+            // Animate a piece appearing on the board
+            function animatePiece(piece) {
+                const startScale = 0;
+                const endScale = 1;
+                const duration = 500; // milliseconds
+                const startTime = Date.now();
+                
+                function animate() {
+                    const elapsed = Date.now() - startTime;
+                    const progress = Math.min(elapsed / duration, 1);
+                    
+                    // Elastic easing function
+                    const scale = startScale + (endScale - startScale) * 
+                        (progress === 1 ? 1 : 
+                            Math.pow(2, -10 * progress) * Math.sin((progress - 0.1) * 5 * Math.PI) + 1);
+                    
+                    piece.scale.set(scale, scale, scale);
+                    
+                    if (progress < 1) {
+                        requestAnimationFrame(animate);
+                    }
+                }
+                
+                animate();
+            }
+
+            // Check if there's a winner
+            function checkWinner() {
+                for (const combination of winCombinations) {
+                    const [a, b, c] = combination;
+                    if (gameState[a] && gameState[a] === gameState[b] && gameState[a] === gameState[c]) {
+                        // Highlight the winning line
+                        highlightWinningLine(combination);
+                        return true;
+                    }
+                }
+                return false;
+            }
+
+            // Highlight the winning line
+            function highlightWinningLine(combination) {
+                const [a, b, c] = combination;
+                const startPos = cellPositions[a];
+                const endPos = cellPositions[c];
+                
+                const lineMaterial = new THREE.LineBasicMaterial({ color: 0x4cc9f0, linewidth: 5 });
+                const points = [];
+                points.push(new THREE.Vector3(startPos[0], startPos[1], 0.2));
+                points.push(new THREE.Vector3(endPos[0], endPos[1], 0.2));
+                
+                const lineGeometry = new THREE.BufferGeometry().setFromPoints(points);
+                const line = new THREE.Line(lineGeometry, lineMaterial);
+                
+                boardGroup.add(line);
+                
+                // Animate the line
+                animateWinningLine(line);
+            }
+
+            // Animate the winning line
+            function animateWinningLine(line) {
+                const duration = 1000; // milliseconds
+                const startTime = Date.now();
+                
+                function animate() {
+                    const elapsed = Date.now() - startTime;
+                    const progress = Math.min(elapsed / duration, 1);
+                    
+                    // Pulse effect
+                    const scale = 1 + 0.2 * Math.sin(progress * Math.PI * 10);
+                    line.scale.set(1, scale, 1);
+                    
+                    if (elapsed < 3000) { // animate for 3 seconds
+                        requestAnimationFrame(animate);
+                    }
+                }
+                
+                animate();
+            }
+
+            // Reset the game board
+            function resetGame() {
+                // Clear the game state
+                gameState = ['', '', '', '', '', '', '', '', ''];
+                currentPlayer = 'X';
+                gameActive = true;
+                
+                // Remove all pieces from the board
+                while (boardGroup.children.length > cells.length + 1) { // +1 for the board background
+                    boardGroup.remove(boardGroup.children[boardGroup.children.length - 1]);
+                }
+                
+                // Reset UI
+                updateStatus(isSinglePlayerMode ? 'Game reset. Player X starts.' : 'Game reset. Player X starts.');
+                updateTurnIndicator();
+                document.getElementById('restart').classList.add('hidden');
+                
+                // Send reset to peer if in multiplayer mode
+                if (conn && !isSinglePlayerMode) {
+                    conn.send({
+                        type: 'reset'
+                    });
+                }
+            }
+
+            // ========================
+            // P2P Networking with PeerJS
+            // ========================
+            
+            function initPeer() {
+                // Create a new peer connection
+                peer = new Peer();
+                
+                // When the peer connection is established
+                peer.on('open', (id) => {
+                    hideLoading();
+                    updateStatus('Connected to PeerJS server.');
+                });
+                
+                // When a connection error occurs
+                peer.on('error', (err) => {
+                    hideLoading();
+                    console.error('PeerJS error:', err);
+                    updateStatus('Connection error: ' + err.type);
+                });
+                
+                // When a new connection is received
+                peer.on('connection', (connection) => {
+                    conn = connection;
+                    setupConnection();
+                });
+            }
+
+            // Create a new game as host
+            document.getElementById('create-game').addEventListener('click', () => {
+                if (!peer) {
+                    showLoading();
+                    initPeer();
+                }
+                
+                peer.on('open', (id) => {
+                    gameId = id;
+                    isHost = true;
+                    mySymbol = 'X';
+                    document.getElementById('game-id').textContent = id;
+                    document.getElementById('host-info').classList.remove('hidden');
+                    updateStatus('Waiting for an opponent to join...');
+                });
+            });
+
+            // Join an existing game
+            document.getElementById('join-game').addEventListener('click', () => {
+                const joinId = document.getElementById('join-id').value.trim();
+                
+                if (!joinId) {
+                    updateStatus('Please enter a valid game ID.');
+                    return;
+                }
+                
+                if (!peer) {
+                    showLoading();
+                    initPeer();
+                }
+                
+                peer.on('open', () => {
+                    // Connect to the host
+                    conn = peer.connect(joinId);
+                    isHost = false;
+                    mySymbol = 'O';
+                    setupConnection();
+                });
+            });
+
+            // Copy the game ID to clipboard
+            document.getElementById('copy-id').addEventListener('click', () => {
+                const gameIdText = document.getElementById('game-id').textContent;
+                navigator.clipboard.writeText(gameIdText)
+                    .then(() => {
+                        updateStatus('Game ID copied to clipboard!');
+                    })
+                    .catch(err => {
+                        console.error('Could not copy text: ', err);
+                    });
+            });
+
+            // Restart the game
+            document.getElementById('restart').addEventListener('click', () => {
+                resetGame();
+            });
+
+            // Setup the data connection
+            function setupConnection() {
+                conn.on('open', () => {
+                    hideLoading();
+                    updateStatus('Connected to opponent!');
+                    document.getElementById('connection-panel').classList.add('hidden');
+                    document.getElementById('turn-indicator').classList.remove('hidden');
+                    gameActive = true;
+                    updateTurnIndicator();
+                    
+                    // Start the game if you're the host
+                    if (isHost) {
+                        currentPlayer = 'X';
+                    } else {
+                        currentPlayer = 'X'; // X always starts, even when joining
+                    }
+                });
+                
+                conn.on('data', handlePeerData);
+                
+                conn.on('close', () => {
+                    updateStatus('Opponent disconnected.');
+                    gameActive = false;
+                });
+                
+                conn.on('error', (err) => {
+                    console.error('Connection error:', err);
+                    updateStatus('Connection error: ' + err);
+                });
+            }
+
+            // Handle data received from the peer
+            function handlePeerData(data) {
+                if (data.type === 'move') {
+                    // Update the game state
+                    gameState = data.gameState;
+                    currentPlayer = data.currentPlayer;
+                    
+                    // Update the board visually
+                    refreshBoard();
+                    
+                    // Check game state
+                    if (checkWinner()) {
+                        const winner = currentPlayer === 'X' ? 'O' : 'X'; // Previous player won
+                        updateStatus(`Player ${winner} wins!`);
+                        gameActive = false;
+                        document.getElementById('restart').classList.remove('hidden');
+                    } else if (gameState.every(cell => cell !== '')) {
+                        updateStatus("It's a draw!");
+                        gameActive = false;
+                        document.getElementById('restart').classList.remove('hidden');
+                    } else {
+                        updateTurnIndicator();
+                    }
+                } else if (data.type === 'reset') {
+                    resetGame();
+                }
+            }
+
+            // Refresh the board to match the current game state
+            function refreshBoard() {
+                // Remove all pieces from the board
+                while (boardGroup.children.length > cells.length + 1) { // +1 for the board
+                    boardGroup.remove(boardGroup.children[boardGroup.children.length - 1]);
+                }
+                
+                // Place pieces according to game state
+                for (let i = 0; i < 9; i++) {
+                    if (gameState[i] !== '') {
+                        placePiece(i, gameState[i]);
+                    }
+                }
+            }
+
+            // ========================
+            // UI Helpers
+            // ========================
+            
+            function updateStatus(message) {
+                document.getElementById('status').textContent = message;
+            }
+            
+            function updateTurnIndicator() {
+                const turnIndicator = document.getElementById('turn-indicator');
+                if (isSinglePlayerMode) {
+                    turnIndicator.textContent = `Current turn: ${currentPlayer}`;
+                    turnIndicator.style.color = currentPlayer === 'X' ? '#f72585' : '#4361ee';
+                } else {
+                    if (mySymbol === currentPlayer) {
+                        turnIndicator.textContent = 'Your turn!';
+                        turnIndicator.style.color = mySymbol === 'X' ? '#f72585' : '#4361ee';
+                    } else {
+                        turnIndicator.textContent = 'Opponent\'s turn...';
+                        turnIndicator.style.color = '#999';
+                    }
+                }
+            }
+            
+            function showLoading() {
+                document.getElementById('loading').style.display = 'flex';
+            }
+            
+            function hideLoading() {
+                document.getElementById('loading').style.display = 'none';
+            }
+
+            // ========================
+            // Camera Controls
+            // ========================
+            
+            // Add orbit controls
+            let isDragging = false;
+            let previousMousePosition = { x: 0, y: 0 };
+            
+            window.addEventListener('mousedown', (e) => {
+                isDragging = true;
+                previousMousePosition = { x: e.clientX, y: e.clientY };
+            });
+            
+            window.addEventListener('mouseup', () => {
+                isDragging = false;
+            });
+            
+            window.addEventListener('mousemove', (e) => {
+                if (isDragging) {
+                    const deltaMove = {
+                        x: e.clientX - previousMousePosition.x,
+                        y: e.clientY - previousMousePosition.y
+                    };
+                    
+                    // Rotate the board
+                    boardGroup.rotation.y += deltaMove.x * 0.01;
+                    boardGroup.rotation.x += deltaMove.y * 0.01;
+                    
+                    previousMousePosition = { x: e.clientX, y: e.clientY };
+                }
+            });
+            
+            // Add zoom with mouse wheel
+            window.addEventListener('wheel', (e) => {
+                const zoomSpeed = 0.1;
+                if (e.deltaY < 0) {
+                    // Zoom in
+                    camera.position.z = Math.max(5, camera.position.z - zoomSpeed);
+                } else {
+                    // Zoom out
+                    camera.position.z = Math.min(12, camera.position.z + zoomSpeed);
+                }
+            });
+
+            // Window resize handling
+            window.addEventListener('resize', () => {
+                camera.aspect = window.innerWidth / window.innerHeight;
+                camera.updateProjectionMatrix();
+                renderer.setSize(window.innerWidth, window.innerHeight);
+            });
+
+            // ========================
+            // Animation Loop
+            // ========================
+            
+            function animate() {
+                requestAnimationFrame(animate);
+                
+                // Add subtle continuous rotation to the board for visual interest
+                if (!isDragging) {
+                    boardGroup.rotation.y += 0.002;
+                }
+                
+                renderer.render(scene, camera);
+            }
+            
+            // Start animation
+            animate();
+            
+            // Initialize PeerJS
+            hideLoading();
+
+            // Single player mode
+            document.getElementById('single-player').addEventListener('click', () => {
+                // Set up single player mode
+                isSinglePlayerMode = true;
+                gameActive = true;
+                mySymbol = 'BOTH'; // Player controls both X and O
+                currentPlayer = 'X'; // X starts by convention
+                
+                // Update UI
+                document.getElementById('connection-panel').classList.add('hidden');
+                document.getElementById('turn-indicator').classList.remove('hidden');
+                updateTurnIndicator();
+                updateStatus('Single player mode activated! You control both X and O.');
+            });
+        });
+    </script>
+</body>
+</html>

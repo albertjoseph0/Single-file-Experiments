@@ -1,0 +1,430 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Musical Sketch</title>
+    <style>
+        body {
+            margin: 0;
+            padding: 0;
+            overflow: hidden;
+            background-color: #f8f9fa;
+            font-family: 'Helvetica Neue', Arial, sans-serif;
+        }
+        #canvas-container {
+            position: relative;
+            width: 100vw;
+            height: 100vh;
+            cursor: pointer;
+        }
+        canvas {
+            position: absolute;
+            top: 0;
+            left: 0;
+        }
+        .controls {
+            position: absolute;
+            bottom: 20px;
+            left: 20px;
+            z-index: 10;
+            background: rgba(255, 255, 255, 0.8);
+            padding: 10px 15px;
+            border-radius: 10px;
+            box-shadow: 0 2px 10px rgba(0, 0, 0, 0.1);
+        }
+        button {
+            background: #4a6cd3;
+            color: white;
+            border: none;
+            padding: 8px 15px;
+            margin-right: 8px;
+            border-radius: 4px;
+            cursor: pointer;
+            transition: background 0.2s;
+        }
+        button:hover {
+            background: #3a57b5;
+        }
+        .welcome {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            background: rgba(255, 255, 255, 0.9);
+            padding: 20px 30px;
+            border-radius: 12px;
+            box-shadow: 0 4px 20px rgba(0, 0, 0, 0.15);
+            text-align: center;
+            max-width: 80%;
+            z-index: 100;
+        }
+        .welcome h1 {
+            color: #4a6cd3;
+            margin-bottom: 15px;
+        }
+        .welcome button {
+            margin-top: 15px;
+            padding: 10px 20px;
+        }
+        .hidden {
+            display: none;
+        }
+    </style>
+</head>
+<body>
+    <div id="canvas-container">
+        <canvas id="canvas"></canvas>
+    </div>
+    
+    <div class="controls">
+        <button id="clear-btn">Clear</button>
+        <button id="toggle-sound-btn">Sound: On</button>
+    </div>
+    
+    <div class="welcome" id="welcome-modal">
+        <h1>Musical Sketch</h1>
+        <p>Click, drag, or tap anywhere to create musical elements and visuals.</p>
+        <p>Each interaction generates unique sounds and hand-drawn graphics.</p>
+        <button id="start-btn">Start Creating</button>
+    </div>
+
+    <!-- Libraries -->
+    <script src="https://cdn.jsdelivr.net/npm/tone@14.7.77/build/Tone.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/roughjs@4.5.2/bundled/rough.js"></script>
+    
+    <script>
+        document.addEventListener('DOMContentLoaded', () => {
+            // Initialize welcome modal
+            const welcomeModal = document.getElementById('welcome-modal');
+            const startBtn = document.getElementById('start-btn');
+            const clearBtn = document.getElementById('clear-btn');
+            const toggleSoundBtn = document.getElementById('toggle-sound-btn');
+            
+            // Canvas setup
+            const canvas = document.getElementById('canvas');
+            const ctx = canvas.getContext('2d');
+            
+            // Set canvas dimensions
+            function resizeCanvas() {
+                canvas.width = window.innerWidth;
+                canvas.height = window.innerHeight;
+                // Only call draw if it has been defined
+                if (typeof draw === 'function') {
+                    draw(); // Redraw elements when resizing
+                }
+            }
+            
+            window.addEventListener('resize', resizeCanvas);
+            // Initial canvas sizing without drawing
+            canvas.width = window.innerWidth;
+            canvas.height = window.innerHeight;
+            
+            // RoughJS setup
+            const roughCanvas = rough.canvas(canvas);
+            
+            // Tone.js setup
+            let isSoundEnabled = true;
+            let synth = new Tone.PolySynth(Tone.Synth).toDestination();
+            let effectSynth = new Tone.Synth({
+                oscillator: {
+                    type: "sine"
+                },
+                envelope: {
+                    attack: 0.005,
+                    decay: 0.1,
+                    sustain: 0.3,
+                    release: 1
+                }
+            }).toDestination();
+            
+            // Add reverb
+            const reverb = new Tone.JCReverb(0.4).toDestination();
+            synth.connect(reverb);
+            effectSynth.connect(reverb);
+            
+            // Elements array to store all visual and sound nodes
+            let elements = [];
+            let isDrawing = false;
+            let lastPoint = null;
+            
+            // Color palette
+            const colors = [
+                '#FF5E5B', '#D8D8D8', '#FFFFEA', '#00CECB', '#FFED66',
+                '#3772FF', '#DF2935', '#FDCA40', '#63B0CD', '#FF8484'
+            ];
+            
+            // Musical scales
+            const scales = {
+                pentatonic: ['C4', 'D4', 'E4', 'G4', 'A4', 'C5', 'D5', 'E5', 'G5', 'A5'],
+                major: ['C4', 'D4', 'E4', 'F4', 'G4', 'A4', 'B4', 'C5'],
+                minor: ['C4', 'D4', 'Eb4', 'F4', 'G4', 'Ab4', 'Bb4', 'C5']
+            };
+            
+            let currentScale = scales.pentatonic;
+            
+            // Element types
+            const elementTypes = ['circle', 'line', 'rectangle', 'path', 'arc'];
+            
+            // Interface events
+            startBtn.addEventListener('click', () => {
+                welcomeModal.classList.add('hidden');
+                // Initialize audio context with user gesture
+                Tone.start();
+            });
+            
+            clearBtn.addEventListener('click', () => {
+                elements = [];
+                draw();
+            });
+            
+            toggleSoundBtn.addEventListener('click', () => {
+                isSoundEnabled = !isSoundEnabled;
+                toggleSoundBtn.textContent = `Sound: ${isSoundEnabled ? 'On' : 'Off'}`;
+            });
+            
+            // Canvas interaction events
+            canvas.addEventListener('mousedown', startInteraction);
+            canvas.addEventListener('mousemove', moveInteraction);
+            canvas.addEventListener('mouseup', endInteraction);
+            canvas.addEventListener('mouseleave', endInteraction);
+            
+            // Touch support
+            canvas.addEventListener('touchstart', (e) => {
+                e.preventDefault();
+                startInteraction(convertTouchToMouse(e));
+            });
+            
+            canvas.addEventListener('touchmove', (e) => {
+                e.preventDefault();
+                moveInteraction(convertTouchToMouse(e));
+            });
+            
+            canvas.addEventListener('touchend', (e) => {
+                e.preventDefault();
+                endInteraction();
+            });
+            
+            function convertTouchToMouse(e) {
+                if (e.touches && e.touches.length > 0) {
+                    const touch = e.touches[0];
+                    return {
+                        clientX: touch.clientX,
+                        clientY: touch.clientY,
+                        preventDefault: () => {}
+                    };
+                }
+                return e;
+            }
+            
+            // Interaction handlers
+            function startInteraction(e) {
+                isDrawing = true;
+                const x = e.clientX;
+                const y = e.clientY;
+                
+                lastPoint = { x, y };
+                createElement(x, y);
+            }
+            
+            function moveInteraction(e) {
+                if (!isDrawing) return;
+                
+                const x = e.clientX;
+                const y = e.clientY;
+                
+                // Only create new element if we've moved a certain distance
+                const distance = Math.sqrt(Math.pow(x - lastPoint.x, 2) + Math.pow(y - lastPoint.y, 2));
+                if (distance > 20) {
+                    createElement(x, y);
+                    lastPoint = { x, y };
+                }
+            }
+            
+            function endInteraction() {
+                isDrawing = false;
+                lastPoint = null;
+            }
+            
+            // Create visual and sound elements
+            function createElement(x, y) {
+                const color = colors[Math.floor(Math.random() * colors.length)];
+                const type = elementTypes[Math.floor(Math.random() * elementTypes.length)];
+                const size = 20 + Math.random() * 80;
+                const noteIndex = Math.floor(Math.random() * currentScale.length);
+                const note = currentScale[noteIndex];
+                
+                const newElement = {
+                    x, y, color, type, size, note,
+                    rotation: Math.random() * Math.PI * 2,
+                    roughness: 0.8 + Math.random() * 1.2,
+                    created: Date.now(),
+                    lifetime: 3000 + Math.random() * 5000,
+                    velocity: {
+                        x: (Math.random() - 0.5) * 2,
+                        y: (Math.random() - 0.5) * 2
+                    }
+                };
+                
+                // Play the sound
+                if (isSoundEnabled) {
+                    playSoundForElement(newElement);
+                }
+                
+                elements.push(newElement);
+                draw();
+            }
+            
+            // Play sound for an element
+            function playSoundForElement(element) {
+                const note = element.note;
+                const volume = Math.min(0.7, 0.2 + Math.random() * 0.3);
+                
+                synth.triggerAttackRelease(note, "8n", undefined, volume);
+                
+                // Occasionally add effect sound
+                if (Math.random() > 0.7) {
+                    const effectNote = currentScale[Math.floor(Math.random() * currentScale.length)];
+                    const delay = Math.random() * 0.2;
+                    effectSynth.triggerAttackRelease(effectNote, "16n", Tone.now() + delay, volume * 0.6);
+                }
+            }
+            
+            // Animation loop
+            function animate() {
+                requestAnimationFrame(animate);
+                updateElements();
+                draw();
+            }
+            
+            function updateElements() {
+                const now = Date.now();
+                
+                // Update elements and remove expired ones
+                elements = elements.filter(element => {
+                    // Check if element has expired
+                    if (now - element.created > element.lifetime) {
+                        return false;
+                    }
+                    
+                    // Update element position based on velocity
+                    element.x += element.velocity.x;
+                    element.y += element.velocity.y;
+                    
+                    // Bounce off walls
+                    if (element.x < 0 || element.x > canvas.width) {
+                        element.velocity.x *= -1;
+                        if (isSoundEnabled && Math.random() > 0.7) {
+                            playSoundForElement(element);
+                        }
+                    }
+                    
+                    if (element.y < 0 || element.y > canvas.height) {
+                        element.velocity.y *= -1;
+                        if (isSoundEnabled && Math.random() > 0.7) {
+                            playSoundForElement(element);
+                        }
+                    }
+                    
+                    return true;
+                });
+            }
+            
+            // Draw all elements
+            function draw() {
+                ctx.clearRect(0, 0, canvas.width, canvas.height);
+                
+                elements.forEach(element => {
+                    // Calculate opacity based on lifetime
+                    const age = Date.now() - element.created;
+                    const lifePercent = age / element.lifetime;
+                    
+                    // Fade in and out
+                    let opacity = 1;
+                    if (lifePercent < 0.1) {
+                        opacity = lifePercent * 10; // Fade in
+                    } else if (lifePercent > 0.7) {
+                        opacity = (1 - lifePercent) / 0.3; // Fade out
+                    }
+                    
+                    // Pulse effect
+                    const pulse = 1 + 0.1 * Math.sin(age * 0.01);
+                    const vibration = Math.sin(age * 0.02) * 2;
+                    
+                    // Draw element based on type
+                    ctx.globalAlpha = opacity;
+                    
+                    const options = {
+                        stroke: element.color,
+                        strokeWidth: 2,
+                        roughness: element.roughness,
+                        bowing: 1,
+                        seed: Math.floor(element.created % 1000)
+                    };
+                    
+                    // Save context for rotation
+                    ctx.save();
+                    ctx.translate(element.x, element.y);
+                    ctx.rotate(element.rotation + vibration * 0.02);
+                    
+                    switch (element.type) {
+                        case 'circle':
+                            roughCanvas.circle(0, 0, element.size * pulse, options);
+                            break;
+                        case 'line':
+                            roughCanvas.line(
+                                -element.size/2 + vibration, 
+                                -element.size/2, 
+                                element.size/2, 
+                                element.size/2, 
+                                options
+                            );
+                            break;
+                        case 'rectangle':
+                            roughCanvas.rectangle(
+                                -element.size/2, 
+                                -element.size/2, 
+                                element.size * pulse, 
+                                element.size * 0.75 * pulse, 
+                                options
+                            );
+                            break;
+                        case 'path':
+                            // Create a wavy path
+                            const points = [];
+                            const steps = 6;
+                            for (let i = 0; i < steps; i++) {
+                                const angle = (i / steps) * Math.PI * 2;
+                                const radius = element.size/2 * (0.8 + 0.2 * Math.sin(age * 0.01 + i));
+                                points.push([
+                                    Math.cos(angle) * radius, 
+                                    Math.sin(angle) * radius
+                                ]);
+                            }
+                            roughCanvas.path(`M ${points[0][0]} ${points[0][1]} ${points.map(p => `L ${p[0]} ${p[1]}`).join(' ')} Z`, options);
+                            break;
+                        case 'arc':
+                            roughCanvas.arc(
+                                0, 0, 
+                                element.size * pulse, 
+                                element.size * pulse, 
+                                Math.PI * 0.2, 
+                                Math.PI * 1.8, 
+                                false, 
+                                options
+                            );
+                            break;
+                    }
+                    
+                    ctx.restore();
+                });
+                
+                ctx.globalAlpha = 1;
+            }
+            
+            // Start animation
+            animate();
+        });
+    </script>
+</body>
+</html> 

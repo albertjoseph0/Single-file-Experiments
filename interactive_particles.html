@@ -1,0 +1,319 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Interactive Particle System</title>
+    <style>
+        body {
+            margin: 0;
+            padding: 0;
+            overflow: hidden;
+            background-color: #121212;
+            font-family: Arial, sans-serif;
+        }
+        
+        #canvas {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            z-index: -1;
+        }
+        
+        .particle {
+            position: absolute;
+            border-radius: 50%;
+            pointer-events: none;
+            mix-blend-mode: screen;
+        }
+        
+        .info {
+            position: absolute;
+            bottom: 20px;
+            left: 20px;
+            color: rgba(255, 255, 255, 0.7);
+            background-color: rgba(0, 0, 0, 0.3);
+            padding: 10px 15px;
+            border-radius: 5px;
+            font-size: 14px;
+            pointer-events: none;
+            opacity: 0.8;
+            transition: opacity 0.5s;
+        }
+
+        .info:hover {
+            opacity: 1;
+        }
+    </style>
+</head>
+<body>
+    <div id="canvas"></div>
+    <div class="info">
+        <p>Move your mouse to interact with particles</p>
+        <p>Click to create bursts of particles</p>
+        <p>Double click to change pattern mode</p>
+    </div>
+
+    <!-- Include Anime.js -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/animejs/3.2.1/anime.min.js"></script>
+    
+    <script>
+        document.addEventListener('DOMContentLoaded', () => {
+            // Configuration
+            const config = {
+                particleCount: 100,
+                baseSize: 5,
+                sizeVariation: 3,
+                baseDuration: 3000, 
+                durationVariation: 1500,
+                baseRadius: 30,
+                radiusVariation: 20,
+                maxRadius: 200,
+                baseColor: '#88C0D0',
+                colorVariations: ['#5E81AC', '#B48EAD', '#A3BE8C', '#EBCB8B', '#D08770', '#BF616A'],
+                gravitationalPull: 0.15,
+                patternMode: false,
+                patternTypes: ['circle', 'spiral', 'wave', 'grid'],
+                currentPattern: 0
+            };
+
+            // State
+            const state = {
+                particles: [],
+                mouse: { x: window.innerWidth / 2, y: window.innerHeight / 2 },
+                isMoving: false,
+                lastMoveTime: 0,
+                windowWidth: window.innerWidth,
+                windowHeight: window.innerHeight
+            };
+
+            const canvas = document.getElementById('canvas');
+
+            // Create particles
+            for (let i = 0; i < config.particleCount; i++) {
+                createParticle(
+                    Math.random() * state.windowWidth,
+                    Math.random() * state.windowHeight,
+                    getRandomColor()
+                );
+            }
+
+            // Function to create a particle
+            function createParticle(x, y, color, isImpact = false) {
+                const particle = document.createElement('div');
+                particle.classList.add('particle');
+                
+                const size = config.baseSize + Math.random() * config.sizeVariation;
+                
+                particle.style.width = `${size}px`;
+                particle.style.height = `${size}px`;
+                particle.style.backgroundColor = color;
+                
+                // Set initial position
+                particle.style.left = `${x}px`;
+                particle.style.top = `${y}px`;
+                
+                canvas.appendChild(particle);
+                
+                // Store particle properties
+                const particleObj = {
+                    element: particle,
+                    x: x,
+                    y: y,
+                    size: size,
+                    color: color,
+                    vx: (Math.random() - 0.5) * 2,
+                    vy: (Math.random() - 0.5) * 2,
+                    angle: Math.random() * Math.PI * 2,
+                    speed: 0.5 + Math.random(),
+                    oscillationSpeed: 0.001 + Math.random() * 0.014,
+                    isImpact: isImpact,
+                    isActive: true,
+                    targetX: x,
+                    targetY: y,
+                    phase: Math.random() * 360,
+                    radius: config.baseRadius + Math.random() * config.radiusVariation
+                };
+                
+                state.particles.push(particleObj);
+                
+                // If it's an impact particle, animate it
+                if (isImpact) {
+                    const duration = config.baseDuration + Math.random() * config.durationVariation;
+                    
+                    anime({
+                        targets: particle,
+                        opacity: [1, 0],
+                        scale: [0, 1],
+                        duration: duration,
+                        easing: 'easeOutExpo',
+                        complete: () => {
+                            particleObj.isActive = false;
+                            canvas.removeChild(particle);
+                            const index = state.particles.indexOf(particleObj);
+                            if (index > -1) {
+                                state.particles.splice(index, 1);
+                            }
+                        }
+                    });
+                }
+                
+                return particleObj;
+            }
+
+            // Generate random color
+            function getRandomColor() {
+                if (Math.random() < 0.7) {
+                    return config.baseColor;
+                }
+                return config.colorVariations[Math.floor(Math.random() * config.colorVariations.length)];
+            }
+
+            // Mouse movement tracking
+            document.addEventListener('mousemove', (e) => {
+                state.mouse.x = e.clientX;
+                state.mouse.y = e.clientY;
+                state.isMoving = true;
+                state.lastMoveTime = Date.now();
+                
+                // Occasionally create particle on mouse move
+                if (Math.random() < 0.1) {
+                    createParticle(
+                        e.clientX,
+                        e.clientY,
+                        getRandomColor()
+                    );
+                }
+            });
+
+            // Click event to create burst
+            document.addEventListener('click', (e) => {
+                // Create burst of particles
+                for (let i = 0; i < 15; i++) {
+                    createParticle(
+                        e.clientX,
+                        e.clientY,
+                        getRandomColor(),
+                        true
+                    );
+                }
+            });
+
+            // Double click to change pattern mode
+            document.addEventListener('dblclick', () => {
+                config.patternMode = !config.patternMode;
+                if (config.patternMode) {
+                    config.currentPattern = (config.currentPattern + 1) % config.patternTypes.length;
+                }
+            });
+
+            // Handle window resize
+            window.addEventListener('resize', () => {
+                state.windowWidth = window.innerWidth;
+                state.windowHeight = window.innerHeight;
+            });
+
+            // Animation loop
+            function updateParticles() {
+                // Check if mouse has stopped moving
+                if (state.isMoving && Date.now() - state.lastMoveTime > 100) {
+                    state.isMoving = false;
+                }
+
+                // Update each particle
+                state.particles.forEach(particle => {
+                    if (!particle.isActive) return;
+                    
+                    if (particle.isImpact) {
+                        // Impact particles have their own animation
+                        return;
+                    }
+
+                    let targetX, targetY;
+
+                    // Different behavior based on pattern mode
+                    if (config.patternMode) {
+                        const pattern = config.patternTypes[config.currentPattern];
+                        const time = Date.now() * 0.001;
+                        const index = state.particles.indexOf(particle);
+                        const normalizedIndex = index / state.particles.length;
+                        
+                        switch (pattern) {
+                            case 'circle':
+                                const angle = normalizedIndex * Math.PI * 2 + time;
+                                targetX = state.windowWidth / 2 + Math.cos(angle) * (100 + Math.sin(time) * 50);
+                                targetY = state.windowHeight /.2 + Math.sin(angle) * (100 + Math.sin(time) * 50);
+                                break;
+                            case 'spiral':
+                                const spiralAngle = normalizedIndex * 20 + time * 2;
+                                const radius = normalizedIndex * 200;
+                                targetX = state.windowWidth / 2 + Math.cos(spiralAngle) * radius;
+                                targetY = state.windowHeight / 2 + Math.sin(spiralAngle) * radius;
+                                break;
+                            case 'wave':
+                                targetX = (normalizedIndex * state.windowWidth);
+                                targetY = state.windowHeight / 2 + Math.sin(normalizedIndex * 20 + time * 3) * 100;
+                                break;
+                            case 'grid':
+                                const gridSize = Math.ceil(Math.sqrt(config.particleCount));
+                                const gridX = index % gridSize;
+                                const gridY = Math.floor(index / gridSize);
+                                const spacing = Math.min(state.windowWidth, state.windowHeight) / (gridSize + 1);
+                                targetX = (gridX + 1) * spacing + Math.sin(time + normalizedIndex * 5) * 20;
+                                targetY = (gridY + 1) * spacing + Math.cos(time + normalizedIndex * 5) * 20;
+                                break;
+                        }
+                    } else {
+                        // Regular behavior: particles move randomly and are attracted to mouse
+                        particle.angle += particle.oscillationSpeed;
+                        particle.phase += particle.oscillationSpeed;
+                        
+                        // Natural movement
+                        targetX = particle.x + Math.cos(particle.angle) * 2;
+                        targetY = particle.y + Math.sin(particle.angle) * 2;
+                        
+                        // Mouse influence when moving
+                        if (state.isMoving) {
+                            const dx = state.mouse.x - particle.x;
+                            const dy = state.mouse.y - particle.y;
+                            const distance = Math.sqrt(dx * dx + dy * dy);
+                            
+                            if (distance < config.maxRadius) {
+                                const influence = (config.maxRadius - distance) / config.maxRadius;
+                                targetX += dx * influence * config.gravitationalPull;
+                                targetY += dy * influence * config.gravitationalPull;
+                                
+                                // Add slight color shift based on mouse proximity
+                                const hue = (Date.now() * 0.01 + distance) % 360;
+                                if (Math.random() < 0.05) {
+                                    particle.element.style.backgroundColor = `hsl(${hue}, 80%, 60%)`;
+                                }
+                            }
+                        }
+                    }
+                    
+                    // Apply smooth movement
+                    particle.x += (targetX - particle.x) * 0.05;
+                    particle.y += (targetY - particle.y) * 0.05;
+                    
+                    // Keep particles on screen
+                    if (particle.x < 0) particle.x = 0;
+                    if (particle.x > state.windowWidth) particle.x = state.windowWidth;
+                    if (particle.y < 0) particle.y = 0;
+                    if (particle.y > state.windowHeight) particle.y = state.windowHeight;
+                    
+                    // Update position
+                    particle.element.style.transform = `translate(${particle.x - particle.size / 2}px, ${particle.y - particle.size / 2}px)`;
+                });
+
+                requestAnimationFrame(updateParticles);
+            }
+
+            // Start animation
+            updateParticles();
+        });
+    </script>
+</body>
+</html> 

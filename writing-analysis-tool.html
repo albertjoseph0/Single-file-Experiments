@@ -1,0 +1,330 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Writing Analysis Tool</title>
+    <style>
+        * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+        }
+        
+        body {
+            line-height: 1.6;
+            color: #333;
+            padding: 20px;
+            background-color: #f9f9f9;
+        }
+        
+        .container {
+            max-width: 800px;
+            margin: 0 auto;
+            background-color: #fff;
+            padding: 30px;
+            border-radius: 8px;
+            box-shadow: 0 2px 10px rgba(0, 0, 0, 0.1);
+        }
+        
+        h1 {
+            text-align: center;
+            margin-bottom: 20px;
+            color: #2c3e50;
+        }
+        
+        .description {
+            text-align: center;
+            margin-bottom: 25px;
+            color: #7f8c8d;
+        }
+        
+        textarea {
+            width: 100%;
+            min-height: 200px;
+            padding: 15px;
+            margin-bottom: 20px;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            font-size: 16px;
+            resize: vertical;
+        }
+        
+        button {
+            display: block;
+            width: 100%;
+            max-width: 200px;
+            margin: 0 auto 30px;
+            padding: 12px;
+            background-color: #3498db;
+            color: white;
+            border: none;
+            border-radius: 4px;
+            font-size: 16px;
+            cursor: pointer;
+            transition: background-color 0.3s;
+        }
+        
+        button:hover {
+            background-color: #2980b9;
+        }
+        
+        #results {
+            display: none;
+            background-color: #f8f9fa;
+            border: 1px solid #e9ecef;
+            border-radius: 4px;
+            padding: 20px;
+            margin-top: 20px;
+        }
+        
+        .result-section {
+            margin-bottom: 25px;
+        }
+        
+        .result-section h3 {
+            color: #2c3e50;
+            margin-bottom: 10px;
+            padding-bottom: 5px;
+            border-bottom: 1px solid #eee;
+        }
+        
+        .score {
+            font-size: 18px;
+            font-weight: bold;
+            color: #2c3e50;
+            margin: 10px 0;
+        }
+        
+        .explanation {
+            color: #7f8c8d;
+            font-style: italic;
+            margin-bottom: 15px;
+        }
+        
+        .long-sentence {
+            background-color: #fff;
+            padding: 10px;
+            border-left: 3px solid #e74c3c;
+            margin-bottom: 10px;
+            border-radius: 0 4px 4px 0;
+        }
+        
+        @media (max-width: 600px) {
+            .container {
+                padding: 15px;
+            }
+            
+            textarea {
+                min-height: 150px;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>Writing Analysis Tool</h1>
+        <p class="description">Paste your text below to analyze its readability and get suggestions for improvement.</p>
+        
+        <textarea id="textInput" placeholder="Enter or paste your text here..."></textarea>
+        <button id="analyzeBtn">Analyze Text</button>
+        
+        <div id="results">
+            <div class="result-section">
+                <h3>Readability Scores</h3>
+                <div id="fleschScore" class="score"></div>
+                <p class="explanation">The Flesch-Kincaid Reading Ease score ranges from 0-100. Higher scores indicate easier reading. 60-70 is considered plain English, suitable for most adults.</p>
+                
+                <div id="fogIndex" class="score"></div>
+                <p class="explanation">The Gunning Fog Index estimates the years of formal education needed to understand the text. Scores above 12 suggest college-level difficulty.</p>
+            </div>
+            
+            <div class="result-section">
+                <h3>Text Statistics</h3>
+                <div id="textStats"></div>
+            </div>
+            
+            <div class="result-section">
+                <h3>Long Sentences</h3>
+                <p class="explanation">These sentences have more than 20 words. Consider shortening them for better readability.</p>
+                <div id="longSentences"></div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        document.getElementById('analyzeBtn').addEventListener('click', function() {
+            const text = document.getElementById('textInput').value.trim();
+            
+            if (text === '') {
+                alert('Please enter some text to analyze.');
+                return;
+            }
+            
+            analyzeText(text);
+        });
+        
+        function analyzeText(text) {
+            // Get basic text statistics
+            const words = countWords(text);
+            const sentences = countSentences(text);
+            const syllables = countSyllables(text);
+            const complexWords = countComplexWords(text);
+            const charactersNoSpaces = text.replace(/\s/g, '').length;
+            
+            // Calculate readability scores
+            const fleschScore = calculateFleschScore(words, sentences, syllables);
+            const fogIndex = calculateGunningFog(words, sentences, complexWords);
+            
+            // Find long sentences
+            const longSentences = findLongSentences(text);
+            
+            // Display results
+            displayResults(fleschScore, fogIndex, words, sentences, syllables, charactersNoSpaces, longSentences);
+        }
+        
+        function countWords(text) {
+            return text.match(/\b\S+\b/g)?.length || 0;
+        }
+        
+        function countSentences(text) {
+            // Accounting for common sentence endings: periods, question marks, exclamation points
+            // Also handling common abbreviations to avoid miscounting (Mr., Dr., etc.)
+            const sentenceEndPattern = /[.!?](?!\d)(?![A-Z][a-z])(?!\.{2,})(?!\s[a-z])(?!\s[A-Z][a-z])(?!\s['"]\s*[A-Z])(?!['"]\s*$)/g;
+            const matches = text.match(sentenceEndPattern);
+            // If no clear sentence endings are found, assume at least one sentence
+            return matches ? matches.length : (text.length > 0 ? 1 : 0);
+        }
+        
+        function countSyllables(text) {
+            // Remove non-words and split into words
+            const words = text.toLowerCase().replace(/[^a-z]/g, ' ').split(/\s+/);
+            let count = 0;
+            
+            for (let word of words) {
+                if (word.length <= 0) continue;
+                
+                // Rule 1: Subtract syllables from words ending with "es" or "ed"
+                if (word.endsWith('es') || word.endsWith('ed')) {
+                    const subWord = word.substring(0, word.length - 2);
+                    // Only subtract if the remaining word has a vowel
+                    if (/[aeiouy]/.test(subWord)) {
+                        word = subWord;
+                    }
+                }
+                
+                // Rule 2: Count vowel groups
+                const vowelGroups = word.match(/[aeiouy]+/g);
+                if (vowelGroups) {
+                    count += vowelGroups.length;
+                }
+                
+                // Rule 3: Words with no vowels get one syllable (like "nth")
+                else {
+                    count += 1;
+                }
+                
+                // Rule 4: Subtract syllable if word ends with silent 'e'
+                if (word.length > 2 && word.endsWith('e') && !/[aeiouy]/.test(word.charAt(word.length - 2))) {
+                    count -= 1;
+                }
+                
+                // Rule 5: Ensure every word has at least one syllable
+                if (word.length > 0 && count === 0) {
+                    count += 1;
+                }
+            }
+            
+            return count;
+        }
+        
+        function countComplexWords(text) {
+            // Complex words are words with 3 or more syllables
+            const words = text.toLowerCase().replace(/[^a-z]/g, ' ').split(/\s+/);
+            let count = 0;
+            
+            for (let word of words) {
+                if (word.length <= 0) continue;
+                
+                // Skip common suffixes that don't add complexity
+                if (word.endsWith('es') || word.endsWith('ed')) {
+                    word = word.substring(0, word.length - 2);
+                }
+                
+                // Count vowel groups in this word
+                const vowelGroups = word.match(/[aeiouy]+/g);
+                const syllableCount = vowelGroups ? vowelGroups.length : 1;
+                
+                // Adjust for silent 'e' at the end
+                const adjustedCount = word.endsWith('e') && syllableCount > 1 ? syllableCount - 1 : syllableCount;
+                
+                // If word has 3 or more syllables, it's complex
+                if (adjustedCount >= 3) {
+                    count++;
+                }
+            }
+            
+            return count;
+        }
+        
+        function calculateFleschScore(words, sentences, syllables) {
+            if (words === 0 || sentences === 0) return 0;
+            
+            return 206.835 - (1.015 * (words / sentences)) - (84.6 * (syllables / words));
+        }
+        
+        function calculateGunningFog(words, sentences, complexWords) {
+            if (words === 0 || sentences === 0) return 0;
+            
+            return 0.4 * ((words / sentences) + 100 * (complexWords / words));
+        }
+        
+        function findLongSentences(text) {
+            // Split text into sentences
+            const sentencePattern = /[^.!?]+[.!?]+/g;
+            const sentences = text.match(sentencePattern) || [];
+            
+            // Filter for sentences with more than 20 words
+            return sentences.filter(sentence => {
+                const wordCount = (sentence.match(/\b\S+\b/g) || []).length;
+                return wordCount > 20;
+            });
+        }
+        
+        function displayResults(fleschScore, fogIndex, words, sentences, syllables, characters, longSentences) {
+            // Display readability scores
+            document.getElementById('fleschScore').textContent = `Flesch-Kincaid Reading Ease: ${fleschScore.toFixed(1)}`;
+            document.getElementById('fogIndex').textContent = `Gunning Fog Index: ${fogIndex.toFixed(1)}`;
+            
+            // Display text statistics
+            document.getElementById('textStats').innerHTML = `
+                <p>Words: ${words}</p>
+                <p>Sentences: ${sentences}</p>
+                <p>Syllables: ${syllables}</p>
+                <p>Characters (no spaces): ${characters}</p>
+                <p>Words per sentence: ${(words / sentences).toFixed(1)}</p>
+                <p>Syllables per word: ${(syllables / words).toFixed(1)}</p>
+            `;
+            
+            // Display long sentences
+            const longSentencesContainer = document.getElementById('longSentences');
+            longSentencesContainer.innerHTML = '';
+            
+            if (longSentences.length === 0) {
+                longSentencesContainer.innerHTML = '<p>No long sentences found. Great job!</p>';
+            } else {
+                longSentences.forEach(sentence => {
+                    const sentenceElement = document.createElement('div');
+                    sentenceElement.className = 'long-sentence';
+                    sentenceElement.textContent = sentence.trim();
+                    longSentencesContainer.appendChild(sentenceElement);
+                });
+            }
+            
+            // Show results
+            document.getElementById('results').style.display = 'block';
+        }
+    </script>
+</body>
+</html> 

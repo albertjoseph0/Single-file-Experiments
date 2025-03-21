@@ -1,0 +1,489 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Fractal Universe Explorer</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            overflow: hidden;
+        }
+        body {
+            background-color: #000;
+            font-family: Arial, sans-serif;
+        }
+        canvas {
+            display: block;
+        }
+        #info {
+            position: absolute;
+            top: 10px;
+            left: 10px;
+            color: white;
+            font-size: 13px;
+            background-color: rgba(0, 0, 0, 0.5);
+            padding: 10px;
+            border-radius: 5px;
+            pointer-events: none;
+            transition: opacity 0.5s;
+            opacity: 0.8;
+        }
+        #info.hidden {
+            opacity: 0;
+        }
+        #loading {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background-color: #000;
+            color: white;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            flex-direction: column;
+            z-index: 999;
+            transition: opacity 1s;
+        }
+        #loading.hidden {
+            opacity: 0;
+            pointer-events: none;
+        }
+        #progress-container {
+            width: 300px;
+            height: 10px;
+            background-color: #333;
+            border-radius: 5px;
+            margin-top: 20px;
+        }
+        #progress-bar {
+            height: 100%;
+            width: 0%;
+            background-color: #4285f4;
+            border-radius: 5px;
+            transition: width 0.3s;
+        }
+    </style>
+</head>
+<body>
+    <div id="loading">
+        <h2>Loading Fractal Universe...</h2>
+        <div id="progress-container">
+            <div id="progress-bar"></div>
+        </div>
+    </div>
+    <div id="info">
+        <h3>Fractal Universe Explorer</h3>
+        <p>Navigate: Mouse drag to rotate, Scroll to zoom</p>
+        <p>WASD/Arrows: Move through fractal</p>
+        <p>Space: Reset position</p>
+        <p>H: Toggle this help</p>
+    </div>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/controls/OrbitControls.js"></script>
+    <script>
+        // Wait for resources to load
+        window.addEventListener('load', () => {
+            init();
+            
+            // Simulate loading time with progress
+            let progress = 0;
+            const progressBar = document.getElementById('progress-bar');
+            const loadingScreen = document.getElementById('loading');
+            const interval = setInterval(() => {
+                progress += Math.random() * 15;
+                if (progress >= 100) {
+                    progress = 100;
+                    clearInterval(interval);
+                    setTimeout(() => {
+                        loadingScreen.classList.add('hidden');
+                    }, 500);
+                }
+                progressBar.style.width = progress + '%';
+            }, 200);
+        });
+        
+        // Scene variables
+        let camera, scene, renderer, clock, uniforms;
+        let controls;
+        let moveForward = false, moveBackward = false;
+        let moveLeft = false, moveRight = false;
+        let moveUp = false, moveDown = false;
+        let velocity = new THREE.Vector3();
+        let direction = new THREE.Vector3();
+        let prevTime = performance.now();
+        
+        // Toggle info visibility
+        document.addEventListener('keydown', function(e) {
+            if (e.key === 'h' || e.key === 'H') {
+                document.getElementById('info').classList.toggle('hidden');
+            }
+        });
+        
+        function init() {
+            // Initialize renderer
+            renderer = new THREE.WebGLRenderer({ antialias: true });
+            renderer.setPixelRatio(window.devicePixelRatio);
+            renderer.setSize(window.innerWidth, window.innerHeight);
+            document.body.appendChild(renderer.domElement);
+            
+            // Create scene and camera
+            scene = new THREE.Scene();
+            camera = new THREE.PerspectiveCamera(
+                75, window.innerWidth / window.innerHeight, 0.1, 1000
+            );
+            camera.position.set(0, 0, 2);
+            
+            // Setup clock for animations
+            clock = new THREE.Clock();
+            
+            // Setup OrbitControls
+            controls = new THREE.OrbitControls(camera, renderer.domElement);
+            controls.enableDamping = true;
+            controls.dampingFactor = 0.05;
+            controls.rotateSpeed = 0.5;
+            controls.enableZoom = true;
+            controls.zoomSpeed = 0.5;
+            
+            // Create a shader material for the fractal
+            uniforms = {
+                time: { value: 0 },
+                resolution: { value: new THREE.Vector2(window.innerWidth, window.innerHeight) },
+                cameraPos: { value: camera.position.clone() },
+                cameraTarget: { value: new THREE.Vector3(0, 0, 0) },
+                cameraMatrix: { value: camera.matrixWorld.clone() },
+                pulseSpeed: { value: 0.5 },
+                glowStrength: { value: 0.5 },
+                colorCycle: { value: 0.5 },
+                zoom: { value: 1.0 },
+                fractalDetail: { value: 8.0 }, // Maximum iterations
+                bailout: { value: 2.0 },
+                power: { value: 8.0 }, // Mandelbulb power
+                // Camera movement through the fractal space
+                offset: { value: new THREE.Vector3(0, 0, 0) }
+            };
+            
+            // Vertex shader - simply passes position to the fragment shader
+            const vertexShader = `
+                varying vec2 vUv;
+                
+                void main() {
+                    vUv = uv;
+                    gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+                }
+            `;
+            
+            // Fragment shader - renders the fractal using ray marching
+            const fragmentShader = `
+                uniform float time;
+                uniform vec2 resolution;
+                uniform vec3 cameraPos;
+                uniform vec3 cameraTarget;
+                uniform mat4 cameraMatrix;
+                uniform vec3 offset;
+                uniform float pulseSpeed;
+                uniform float glowStrength;
+                uniform float colorCycle;
+                uniform float zoom;
+                uniform float fractalDetail;
+                uniform float bailout;
+                uniform float power;
+                
+                varying vec2 vUv;
+                
+                const int MAX_STEPS = 100;
+                const float MIN_DIST = 0.001;
+                const float MAX_DIST = 100.0;
+                const float EPSILON = 0.0001;
+                
+                // Mandelbulb distance estimation function
+                float DE(vec3 pos) {
+                    // Apply global movement
+                    pos = pos - offset;
+                    
+                    // Scaling factor that varies over time
+                    float scale = 1.0 + 0.1 * sin(time * 0.1);
+                    pos *= scale;
+                    
+                    vec3 z = pos;
+                    float dr = 1.0;
+                    float r = 0.0;
+                    
+                    // Mandelbulb iteration
+                    for (int i = 0; i < int(fractalDetail); i++) {
+                        r = length(z);
+                        
+                        if (r > bailout) break;
+                        
+                        // Convert to polar coordinates
+                        float theta = acos(z.z / r);
+                        float phi = atan(z.y, z.x);
+                        dr = pow(r, power - 1.0) * power * dr + 1.0;
+                        
+                        // Scale and rotate the point
+                        float zr = pow(r, power);
+                        theta = theta * power;
+                        phi = phi * power;
+                        
+                        // Convert back to cartesian coordinates
+                        z = zr * vec3(sin(theta) * cos(phi), sin(theta) * sin(phi), cos(theta));
+                        z += pos; // Add the original position back
+                        
+                        // Add some variation based on time
+                        z.x += 0.01 * sin(time * 0.5 + pos.y);
+                        z.y += 0.01 * cos(time * 0.4 + pos.x);
+                    }
+                    
+                    return 0.5 * log(r) * r / dr / scale;
+                }
+                
+                // Calculates normal vector at a point
+                vec3 getNormal(vec3 p) {
+                    float e = EPSILON;
+                    return normalize(vec3(
+                        DE(p + vec3(e, 0, 0)) - DE(p - vec3(e, 0, 0)),
+                        DE(p + vec3(0, e, 0)) - DE(p - vec3(0, e, 0)),
+                        DE(p + vec3(0, 0, e)) - DE(p - vec3(0, 0, e))
+                    ));
+                }
+                
+                // Ray marching function
+                float rayMarch(vec3 ro, vec3 rd) {
+                    float t = 0.0;
+                    
+                    for (int i = 0; i < MAX_STEPS; i++) {
+                        vec3 p = ro + rd * t;
+                        float d = DE(p);
+                        
+                        if (d < MIN_DIST || t > MAX_DIST) break;
+                        
+                        t += d * 0.5; // Use a step size smaller than the actual distance for better quality
+                    }
+                    
+                    return t;
+                }
+                
+                // HSV to RGB conversion
+                vec3 hsv2rgb(vec3 c) {
+                    vec4 K = vec4(1.0, 2.0 / 3.0, 1.0 / 3.0, 3.0);
+                    vec3 p = abs(fract(c.xxx + K.xyz) * 6.0 - K.www);
+                    return c.z * mix(K.xxx, clamp(p - K.xxx, 0.0, 1.0), c.y);
+                }
+                
+                void main() {
+                    // Calculate ray direction
+                    vec2 uv = vUv * 2.0 - 1.0;
+                    uv.x *= resolution.x / resolution.y; // Aspect ratio correction
+                    
+                    // Camera setup
+                    vec3 ro = cameraPos;
+                    vec3 rd = normalize(vec3(uv, -zoom));
+                    
+                    // Apply camera rotation
+                    rd = (cameraMatrix * vec4(rd, 0.0)).xyz;
+                    
+                    // Ray marching
+                    float t = rayMarch(ro, rd);
+                    
+                    // Initialize color
+                    vec3 color = vec3(0.0);
+                    
+                    // If we hit the fractal
+                    if (t < MAX_DIST) {
+                        vec3 p = ro + rd * t;
+                        vec3 normal = getNormal(p);
+                        
+                        // Base color based on position and normal
+                        float depth = length(p - ro) / 10.0;
+                        float fresnel = pow(1.0 - max(0.0, dot(normal, -rd)), 5.0);
+                        
+                        // Time-based color cycling
+                        float hue = fract(depth * 0.1 + time * 0.05 * colorCycle);
+                        float sat = 0.7 + 0.3 * sin(time * pulseSpeed + depth);
+                        float val = 0.8 + 0.2 * fresnel;
+                        
+                        color = hsv2rgb(vec3(hue, sat, val));
+                        
+                        // Add glow based on distance field
+                        float glow = exp(-depth * 0.5) * glowStrength;
+                        color += vec3(0.1, 0.4, 0.8) * glow * (0.5 + 0.5 * sin(time * 0.5));
+                        
+                        // Enhance edges
+                        float edge = pow(1.0 - abs(dot(normal, -rd)), 4.0);
+                        color += vec3(1.0, 0.5, 0.2) * edge * 0.5;
+                        
+                        // Add depth-based fog
+                        color = mix(color, vec3(0.0, 0.0, 0.1), 1.0 - exp(-depth * 0.2));
+                    } else {
+                        // Background gradient
+                        float y = uv.y * 0.5 + 0.5;
+                        color = mix(
+                            vec3(0.0, 0.0, 0.1),
+                            vec3(0.0, 0.0, 0.3),
+                            y
+                        );
+                        
+                        // Add star field
+                        vec2 seed = vUv + vec2(sin(time*0.01), cos(time*0.01));
+                        float starIntensity = fract(sin(dot(seed, vec2(12.9898, 78.233))) * 43758.5453);
+                        if (starIntensity > 0.997) {
+                            color += vec3(1.0) * (1.0 - abs(sin(time * 2.0 + starIntensity * 10.0)));
+                        }
+                    }
+                    
+                    // Apply gamma correction
+                    color = pow(color, vec3(0.4545));
+                    
+                    gl_FragColor = vec4(color, 1.0);
+                }
+            `;
+            
+            // Create a plane that fills the screen
+            const geometry = new THREE.PlaneGeometry(2, 2);
+            const material = new THREE.ShaderMaterial({
+                uniforms: uniforms,
+                vertexShader: vertexShader,
+                fragmentShader: fragmentShader
+            });
+            
+            const quad = new THREE.Mesh(geometry, material);
+            scene.add(quad);
+            
+            // Handle window resize
+            window.addEventListener('resize', onWindowResize);
+            
+            // Keyboard controls for movement
+            document.addEventListener('keydown', onKeyDown);
+            document.addEventListener('keyup', onKeyUp);
+            
+            // Reset position on space bar
+            document.addEventListener('keydown', function(e) {
+                if (e.code === 'Space') {
+                    uniforms.offset.value.set(0, 0, 0);
+                    camera.position.set(0, 0, 2);
+                    camera.lookAt(0, 0, 0);
+                    controls.update();
+                }
+            });
+            
+            // Start animation loop
+            animate();
+        }
+        
+        function onWindowResize() {
+            camera.aspect = window.innerWidth / window.innerHeight;
+            camera.updateProjectionMatrix();
+            renderer.setSize(window.innerWidth, window.innerHeight);
+            uniforms.resolution.value.set(window.innerWidth, window.innerHeight);
+        }
+        
+        function onKeyDown(event) {
+            switch (event.code) {
+                case 'ArrowUp':
+                case 'KeyW':
+                    moveForward = true;
+                    break;
+                case 'ArrowLeft':
+                case 'KeyA':
+                    moveLeft = true;
+                    break;
+                case 'ArrowDown':
+                case 'KeyS':
+                    moveBackward = true;
+                    break;
+                case 'ArrowRight':
+                case 'KeyD':
+                    moveRight = true;
+                    break;
+                case 'KeyQ':
+                    moveUp = true;
+                    break;
+                case 'KeyE':
+                    moveDown = true;
+                    break;
+            }
+        }
+        
+        function onKeyUp(event) {
+            switch (event.code) {
+                case 'ArrowUp':
+                case 'KeyW':
+                    moveForward = false;
+                    break;
+                case 'ArrowLeft':
+                case 'KeyA':
+                    moveLeft = false;
+                    break;
+                case 'ArrowDown':
+                case 'KeyS':
+                    moveBackward = false;
+                    break;
+                case 'ArrowRight':
+                case 'KeyD':
+                    moveRight = false;
+                    break;
+                case 'KeyQ':
+                    moveUp = false;
+                    break;
+                case 'KeyE':
+                    moveDown = false;
+                    break;
+            }
+        }
+        
+        function animate() {
+            requestAnimationFrame(animate);
+            
+            const time = clock.getElapsedTime();
+            uniforms.time.value = time;
+            
+            // Update camera matrix
+            camera.updateMatrixWorld();
+            uniforms.cameraMatrix.value.copy(camera.matrixWorld);
+            
+            // Calculate movement
+            const currentTime = performance.now();
+            const delta = (currentTime - prevTime) / 1000;
+            
+            velocity.x -= velocity.x * 10.0 * delta;
+            velocity.y -= velocity.y * 10.0 * delta;
+            velocity.z -= velocity.z * 10.0 * delta;
+            
+            direction.z = Number(moveForward) - Number(moveBackward);
+            direction.x = Number(moveRight) - Number(moveLeft);
+            direction.y = Number(moveUp) - Number(moveDown);
+            direction.normalize();
+            
+            // Move faster with shift key
+            const speedMultiplier = 5.0;
+            const moveSpeed = 0.1;
+            
+            if (moveForward || moveBackward) velocity.z -= direction.z * moveSpeed * speedMultiplier * delta;
+            if (moveLeft || moveRight) velocity.x -= direction.x * moveSpeed * speedMultiplier * delta;
+            if (moveUp || moveDown) velocity.y -= direction.y * moveSpeed * speedMultiplier * delta;
+            
+            // Apply movement to the fractal offset
+            uniforms.offset.value.x += velocity.x;
+            uniforms.offset.value.y += velocity.y;
+            uniforms.offset.value.z += velocity.z;
+            
+            // Animate fractal parameters for more visual interest
+            uniforms.pulseSpeed.value = 0.5 + 0.5 * Math.sin(time * 0.05);
+            uniforms.glowStrength.value = 0.5 + 0.3 * Math.sin(time * 0.2);
+            uniforms.colorCycle.value = 0.5 + 0.5 * Math.sin(time * 0.1);
+            uniforms.power.value = 8.0 + 0.5 * Math.sin(time * 0.03);
+            
+            prevTime = currentTime;
+            
+            // Update controls
+            controls.update();
+            
+            // Render
+            renderer.render(scene, camera);
+        }
+    </script>
+</body>
+</html> 

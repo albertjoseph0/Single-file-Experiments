@@ -1,0 +1,245 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Pomodoro Timer</title>
+    <style>
+        body {
+            font-family: 'Arial', sans-serif;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            height: 100vh;
+            margin: 0;
+            background-color: #f5f5f5;
+        }
+        
+        .container {
+            text-align: center;
+            background-color: white;
+            padding: 2rem;
+            border-radius: 10px;
+            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+            width: 80%;
+            max-width: 400px;
+        }
+        
+        .timer {
+            font-size: 3.5rem;
+            font-weight: bold;
+            margin: 1rem 0;
+            color: #333;
+        }
+        
+        .phase {
+            font-size: 1.5rem;
+            margin-bottom: 1rem;
+            color: #555;
+            font-weight: bold;
+        }
+        
+        .buttons {
+            display: flex;
+            justify-content: center;
+            gap: 1rem;
+            margin: 1.5rem 0;
+        }
+        
+        button {
+            padding: 0.75rem 1.5rem;
+            border: none;
+            border-radius: 5px;
+            cursor: pointer;
+            font-size: 1rem;
+            font-weight: bold;
+            transition: transform 0.1s, opacity 0.1s;
+        }
+        
+        button:active {
+            transform: scale(0.95);
+            opacity: 0.9;
+        }
+        
+        #startPause {
+            background-color: #4caf50;
+            color: white;
+        }
+        
+        #stop {
+            background-color: #f44336;
+            color: white;
+        }
+        
+        #reset {
+            background-color: #2196f3;
+            color: white;
+        }
+        
+        .progress-container {
+            width: 100%;
+            height: 10px;
+            background-color: #e0e0e0;
+            border-radius: 5px;
+            margin-top: 1.5rem;
+            overflow: hidden;
+        }
+        
+        .progress-bar {
+            height: 100%;
+            background-color: #4caf50;
+            width: 100%;
+            border-radius: 5px;
+            transition: width 1s linear;
+        }
+        
+        .work-mode .progress-bar {
+            background-color: #4caf50;
+        }
+        
+        .break-mode .progress-bar {
+            background-color: #2196f3;
+        }
+        
+        .break-mode .phase {
+            color: #2196f3;
+        }
+        
+        .work-mode .phase {
+            color: #4caf50;
+        }
+    </style>
+</head>
+<body>
+    <div class="container work-mode">
+        <h1>Pomodoro Timer</h1>
+        <div class="phase" id="phase-display">Work Time</div>
+        <div class="timer" id="timer-display">25:00</div>
+        <div class="buttons">
+            <button id="startPause">Start</button>
+            <button id="stop">Stop</button>
+            <button id="reset">Reset</button>
+        </div>
+        <div class="progress-container">
+            <div class="progress-bar" id="progress"></div>
+        </div>
+    </div>
+    
+    <audio id="timerSound" preload="auto">
+        <source src="https://assets.mixkit.co/sfx/preview/mixkit-alarm-digital-clock-beep-989.mp3" type="audio/mpeg">
+        Your browser does not support the audio element.
+    </audio>
+    
+    <script>
+        // Timer variables
+        const WORK_TIME = 25 * 60; // 25 minutes in seconds
+        const BREAK_TIME = 5 * 60; // 5 minutes in seconds
+        
+        let timer;
+        let timeRemaining = WORK_TIME;
+        let isRunning = false;
+        let isWorkPhase = true;
+        let totalTime = WORK_TIME;
+        
+        // DOM elements
+        const timerDisplay = document.getElementById('timer-display');
+        const phaseDisplay = document.getElementById('phase-display');
+        const startPauseButton = document.getElementById('startPause');
+        const stopButton = document.getElementById('stop');
+        const resetButton = document.getElementById('reset');
+        const progressBar = document.getElementById('progress');
+        const container = document.querySelector('.container');
+        const timerSound = document.getElementById('timerSound');
+        
+        // Format time as MM:SS
+        function formatTime(seconds) {
+            const minutes = Math.floor(seconds / 60);
+            const secs = seconds % 60;
+            return `${minutes.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
+        }
+        
+        // Update timer display
+        function updateDisplay() {
+            timerDisplay.textContent = formatTime(timeRemaining);
+            
+            // Update progress bar
+            const progressPercent = (timeRemaining / totalTime) * 100;
+            progressBar.style.width = `${progressPercent}%`;
+        }
+        
+        // Start or pause the timer
+        function toggleTimer() {
+            if (isRunning) {
+                clearInterval(timer);
+                startPauseButton.textContent = 'Resume';
+            } else {
+                startTimer();
+                startPauseButton.textContent = 'Pause';
+            }
+            isRunning = !isRunning;
+        }
+        
+        // Start the timer
+        function startTimer() {
+            timer = setInterval(() => {
+                if (timeRemaining > 0) {
+                    timeRemaining--;
+                    updateDisplay();
+                } else {
+                    clearInterval(timer);
+                    timerSound.play();
+                    
+                    // Switch between work and break phases
+                    isWorkPhase = !isWorkPhase;
+                    
+                    if (isWorkPhase) {
+                        timeRemaining = WORK_TIME;
+                        totalTime = WORK_TIME;
+                        phaseDisplay.textContent = 'Work Time';
+                        container.classList.remove('break-mode');
+                        container.classList.add('work-mode');
+                        alert('Break ended! Time to work.');
+                    } else {
+                        timeRemaining = BREAK_TIME;
+                        totalTime = BREAK_TIME;
+                        phaseDisplay.textContent = 'Break Time';
+                        container.classList.remove('work-mode');
+                        container.classList.add('break-mode');
+                        alert('Work session completed! Take a break.');
+                    }
+                    
+                    updateDisplay();
+                    startTimer();
+                }
+            }, 1000);
+        }
+        
+        // Stop the timer completely
+        function stopTimer() {
+            clearInterval(timer);
+            isRunning = false;
+            startPauseButton.textContent = 'Start';
+        }
+        
+        // Reset the timer
+        function resetTimer() {
+            stopTimer();
+            isWorkPhase = true;
+            timeRemaining = WORK_TIME;
+            totalTime = WORK_TIME;
+            phaseDisplay.textContent = 'Work Time';
+            container.classList.remove('break-mode');
+            container.classList.add('work-mode');
+            updateDisplay();
+        }
+        
+        // Event listeners
+        startPauseButton.addEventListener('click', toggleTimer);
+        stopButton.addEventListener('click', stopTimer);
+        resetButton.addEventListener('click', resetTimer);
+        
+        // Initialize the timer display
+        updateDisplay();
+    </script>
+</body>
+</html> 

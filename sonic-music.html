@@ -1,0 +1,612 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Sonic Canvas</title>
+    <style>
+        body {
+            margin: 0;
+            padding: 0;
+            overflow: hidden;
+            font-family: 'Arial', sans-serif;
+            background-color: #121212;
+            touch-action: none;
+            color: white;
+        }
+        
+        #canvas-container {
+            position: relative;
+            width: 100vw;
+            height: 100vh;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+        }
+        
+        canvas {
+            position: absolute;
+            top: 0;
+            left: 0;
+            z-index: 1;
+            pointer-events: auto;
+        }
+        
+        #three-canvas {
+            position: absolute;
+            top: 0;
+            left: 0;
+            z-index: 0; /* Keep behind the UI permanently */
+            width: 100%;
+            height: 100%;
+            pointer-events: none; /* Allow clicks to pass through to canvas below */
+        }
+        
+        #three-canvas canvas {
+            z-index: 0; /* Match container */
+        }
+        
+        .title {
+            position: absolute;
+            top: 20px;
+            width: 100%;
+            text-align: center;
+            color: #1DB954;
+            z-index: 10;
+            font-size: 2.5rem;
+            text-shadow: 2px 2px 4px rgba(0, 0, 0, 0.5);
+        }
+        
+        .subtitle {
+            position: absolute;
+            top: 80px;
+            width: 100%;
+            text-align: center;
+            color: #CCC;
+            z-index: 10;
+            font-size: 1.2rem;
+        }
+        
+        .instructions {
+            position: absolute;
+            bottom: 20px;
+            width: 100%;
+            text-align: center;
+            color: #CCC;
+            z-index: 10;
+            font-size: 1rem;
+        }
+    </style>
+</head>
+<body>
+    <div id="canvas-container">
+        <div id="three-canvas"></div>
+        <h1 class="title">Sonic Canvas</h1>
+        <p class="subtitle">Touch pads to create music</p>
+        <p class="instructions">Drag across multiple pads to create melodies</p>
+        <canvas id="mainCanvas"></canvas>
+    </div>
+
+    <!-- Libraries -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/hammer.js/2.0.8/hammer.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/roughjs@4.5.2/bundled/rough.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/animejs/3.2.1/anime.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/three@0.132.2/build/three.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/three@0.132.2/examples/js/controls/OrbitControls.js"></script>
+
+    <script>
+        document.addEventListener('DOMContentLoaded', function() {
+            // Setup canvas
+            const canvas = document.getElementById('mainCanvas');
+            const ctx = canvas.getContext('2d');
+            
+            // Make canvas fullscreen
+            canvas.width = window.innerWidth;
+            canvas.height = window.innerHeight;
+            
+            // Setup Rough.js
+            const roughCanvas = rough.canvas(canvas);
+            
+            // Create Audio Context
+            const audioContext = new (window.AudioContext || window.webkitAudioContext)();
+            
+            // Define different sound types
+            const soundTypes = ['sine', 'square', 'triangle', 'sawtooth'];
+            
+            // Note frequency mapping
+            const noteFrequencies = {
+                'C3': 130.81, 'C#3': 138.59, 'D3': 146.83, 'D#3': 155.56, 
+                'E3': 164.81, 'F3': 174.61, 'F#3': 185.00, 'G3': 196.00, 
+                'G#3': 207.65, 'A3': 220.00, 'A#3': 233.08, 'B3': 246.94,
+                'C4': 261.63, 'C#4': 277.18, 'D4': 293.66, 'D#4': 311.13, 
+                'E4': 329.63, 'F4': 349.23, 'F#4': 369.99, 'G4': 392.00, 
+                'G#4': 415.30, 'A4': 440.00, 'A#4': 466.16, 'B4': 493.88,
+                'C5': 523.25, 'C#5': 554.37, 'D5': 587.33, 'D#5': 622.25
+            };
+            
+            // ThreeJS setup
+            const threeContainer = document.getElementById('three-canvas');
+            const scene = new THREE.Scene();
+            const camera = new THREE.PerspectiveCamera(60, window.innerWidth / window.innerHeight, 0.1, 1000);
+            const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
+            
+            renderer.setSize(window.innerWidth, window.innerHeight);
+            renderer.setClearColor(0x000000, 0);
+            threeContainer.appendChild(renderer.domElement);
+            
+            camera.position.z = 3;
+            
+            // Create a blob geometry
+            const blobGeometry = new THREE.IcosahedronGeometry(1.5, 5);
+            const blobMaterial = new THREE.MeshPhongMaterial({
+                color: 0x1DB954,
+                emissive: 0x1DB954,
+                emissiveIntensity: 0.5,
+                specular: 0xffffff,
+                shininess: 100,
+                transparent: true,
+                opacity: 0.9,
+                wireframe: false
+            });
+            
+            const blob = new THREE.Mesh(blobGeometry, blobMaterial);
+            scene.add(blob);
+            
+            // Store original vertices for morphing
+            const originalPositions = [];
+            for (let i = 0; i < blobGeometry.attributes.position.count; i++) {
+                originalPositions.push(
+                    blobGeometry.attributes.position.getX(i),
+                    blobGeometry.attributes.position.getY(i),
+                    blobGeometry.attributes.position.getZ(i)
+                );
+            }
+            
+            // Add lights
+            const ambientLight = new THREE.AmbientLight(0x404040, 1.5);
+            scene.add(ambientLight);
+            
+            const directionalLight = new THREE.DirectionalLight(0xffffff, 1);
+            directionalLight.position.set(1, 1, 1);
+            scene.add(directionalLight);
+            
+            const pointLight1 = new THREE.PointLight(0x1DB954, 2, 10);
+            pointLight1.position.set(2, 2, 2);
+            scene.add(pointLight1);
+            
+            const pointLight2 = new THREE.PointLight(0xff00ff, 2, 10);
+            pointLight2.position.set(-2, -2, 2);
+            scene.add(pointLight2);
+            
+            // Simple noise function (instead of SimplexNoise)
+            function simpleNoise3d(x, y, z) {
+                // Simple pseudo-random noise
+                const n = Math.sin(x * 12.9898 + y * 78.233 + z * 37.719) * 43758.5453;
+                return (n - Math.floor(n)) * 2 - 1;
+            }
+            
+            let time = 0;
+            let lastNoteTime = 0;
+            let lastNoteFrequency = 0;
+            let blobIntensity = 0;
+            let blobTargetColor = new THREE.Color(0x1DB954);
+            
+            // Create musical pads configuration
+            const padsConfig = [];
+            
+            // Add all notes to the pads config
+            let index = 0;
+            for (const note in noteFrequencies) {
+                const hue = (index * 15) % 360;
+                padsConfig.push({
+                    note: note,
+                    color: `hsl(${hue}, 80%, 60%)`,
+                    activeColor: `hsl(${hue}, 100%, 75%)`,
+                    soundType: soundTypes[index % soundTypes.length],
+                    threeColor: new THREE.Color(`hsl(${hue}, 80%, 60%)`)
+                });
+                index++;
+            }
+            
+            // Force the initial blob rendering
+            function initBlob() {
+                // Trigger a strong initial distortion
+                blobIntensity = 1.0;
+                lastNoteFrequency = 440; // A4
+                
+                // Render several frames to ensure blob is visible
+                for (let i = 0; i < 10; i++) {
+                    updateBlob();
+                }
+            }
+            
+            // Call initialization
+            initBlob();
+            
+            // Function to play a note
+            function playNote(note, soundType = 'sine') {
+                const oscillator = audioContext.createOscillator();
+                const gainNode = audioContext.createGain();
+                
+                oscillator.type = soundType;
+                oscillator.frequency.value = noteFrequencies[note];
+                
+                // Update 3D blob with note frequency
+                lastNoteTime = Date.now();
+                lastNoteFrequency = noteFrequencies[note];
+                blobIntensity = 1.0;
+                
+                // Add a bit of detune for more character
+                oscillator.detune.value = Math.random() * 10 - 5;
+                
+                gainNode.gain.setValueAtTime(0.6, audioContext.currentTime);
+                gainNode.gain.exponentialRampToValueAtTime(0.001, audioContext.currentTime + 1.5);
+                
+                // Add a second oscillator for richness (slight detuning)
+                if (Math.random() > 0.5) {
+                    const oscillator2 = audioContext.createOscillator();
+                    oscillator2.type = soundType;
+                    oscillator2.frequency.value = noteFrequencies[note];
+                    oscillator2.detune.value = Math.random() * 15 - 7;
+                    oscillator2.connect(gainNode);
+                    oscillator2.start();
+                    oscillator2.stop(audioContext.currentTime + 1.5);
+                }
+                
+                // Add a bit of delay/reverb effect
+                const delay = audioContext.createDelay();
+                delay.delayTime.value = 0.2;
+                
+                const feedbackGain = audioContext.createGain();
+                feedbackGain.gain.value = 0.3;
+                
+                oscillator.connect(gainNode);
+                gainNode.connect(delay);
+                delay.connect(feedbackGain);
+                feedbackGain.connect(delay);
+                gainNode.connect(audioContext.destination);
+                delay.connect(audioContext.destination);
+                
+                oscillator.start();
+                oscillator.stop(audioContext.currentTime + 1.5);
+            }
+            
+            // Create pads objects
+            const pads = [];
+            const padsPerRow = Math.min(8, Math.floor(Math.sqrt(padsConfig.length)));
+            const rows = Math.ceil(padsConfig.length / padsPerRow);
+            const padding = 10;
+            
+            // Calculate pad size based on screen dimensions
+            const containerWidth = canvas.width * 0.95;
+            const containerHeight = canvas.height * 0.7;
+            
+            const padWidth = (containerWidth - (padding * (padsPerRow + 1))) / padsPerRow;
+            const padHeight = (containerHeight - (padding * (rows + 1))) / rows;
+            
+            const startX = (canvas.width - containerWidth) / 2 + padding;
+            const startY = (canvas.height - containerHeight) / 2 + padding;
+            
+            // Create pad positions
+            for (let row = 0; row < rows; row++) {
+                for (let col = 0; col < padsPerRow; col++) {
+                    const index = row * padsPerRow + col;
+                    if (index < padsConfig.length) {
+                        const x = startX + col * (padWidth + padding);
+                        const y = startY + row * (padHeight + padding);
+                        
+                        pads.push({
+                            x: x,
+                            y: y,
+                            width: padWidth,
+                            height: padHeight,
+                            config: padsConfig[index],
+                            active: false,
+                            lastPlayed: 0
+                        });
+                    }
+                }
+            }
+            
+            // Drawing function for individual pad
+            function drawPad(pad) {
+                const color = pad.active ? pad.config.activeColor : pad.config.color;
+                
+                // Draw rounded pad
+                ctx.beginPath();
+                ctx.roundRect(pad.x, pad.y, pad.width, pad.height, 10);
+                ctx.fillStyle = color;
+                ctx.fill();
+                
+                // Add some gradient effect
+                const gradient = ctx.createLinearGradient(pad.x, pad.y, pad.x + pad.width, pad.y + pad.height);
+                gradient.addColorStop(0, 'rgba(255, 255, 255, 0.2)');
+                gradient.addColorStop(1, 'rgba(0, 0, 0, 0.1)');
+                ctx.fillStyle = gradient;
+                ctx.fill();
+                
+                // Add a border
+                ctx.strokeStyle = 'rgba(255, 255, 255, 0.5)';
+                ctx.lineWidth = 1;
+                ctx.stroke();
+                
+                // Draw note text
+                ctx.fillStyle = 'white';
+                ctx.font = `${Math.min(pad.width / 3, 24)}px Arial`;
+                ctx.textAlign = 'center';
+                ctx.textBaseline = 'middle';
+                ctx.fillText(pad.config.note, pad.x + pad.width / 2, pad.y + pad.height / 2);
+            }
+            
+            // Draw a waveform visualization in the background
+            function drawBackground() {
+                ctx.clearRect(0, 0, canvas.width, canvas.height);
+                ctx.fillStyle = 'rgba(18, 18, 18, 0.1)'; // More transparent background
+                ctx.fillRect(0, 0, canvas.width, canvas.height);
+                
+                // Draw some animated waveforms in the background
+                const time = Date.now() / 2000;
+                const amplitude = canvas.height * 0.05;
+                const frequency = Math.PI * 2 / canvas.width;
+                
+                ctx.beginPath();
+                ctx.moveTo(0, canvas.height / 2);
+                
+                for (let x = 0; x < canvas.width; x += 5) {
+                    const y = canvas.height / 2 + 
+                              Math.sin(x * frequency + time) * amplitude +
+                              Math.sin(x * frequency * 2 + time * 1.5) * amplitude / 2;
+                    ctx.lineTo(x, y);
+                }
+                
+                ctx.strokeStyle = 'rgba(29, 185, 84, 0.1)';
+                ctx.lineWidth = 2;
+                ctx.stroke();
+                
+                // Draw a second waveform with different parameters
+                ctx.beginPath();
+                ctx.moveTo(0, canvas.height / 2);
+                
+                for (let x = 0; x < canvas.width; x += 5) {
+                    const y = canvas.height / 2 + 
+                              Math.sin(x * frequency * 0.7 - time) * amplitude * 1.2 +
+                              Math.sin(x * frequency * 1.3 - time * 0.8) * amplitude / 3;
+                    ctx.lineTo(x, y);
+                }
+                
+                ctx.strokeStyle = 'rgba(29, 185, 84, 0.05)';
+                ctx.lineWidth = 3;
+                ctx.stroke();
+            }
+            
+            // Update the three.js blob
+            function updateBlob() {
+                time += 0.01;
+                
+                // Rotate the blob continuously 
+                blob.rotation.x += 0.005;
+                blob.rotation.y += 0.008;
+                
+                // Handle intensity decay after note is played - slow it down slightly
+                if (blobIntensity > 0) {
+                    blobIntensity *= 0.98; // Slower decay
+                    if (blobIntensity < 0.01) blobIntensity = 0;
+                } else {
+                    // Add a small continuous pulsing even when idle
+                    blobIntensity = 0.2 + Math.sin(time * 2) * 0.05;
+                }
+                
+                // More dramatic scaling
+                const scale = 1 + blobIntensity * 0.5;
+                blob.scale.set(scale, scale, scale);
+                
+                // Update blob vertices based on noise and note frequency
+                const positions = blobGeometry.attributes.position.array;
+                const baseBeatEffect = Math.sin(time * 2) * 0.05;
+                
+                for (let i = 0; i < positions.length; i += 3) {
+                    const originalX = originalPositions[i];
+                    const originalY = originalPositions[i + 1];
+                    const originalZ = originalPositions[i + 2];
+                    
+                    // Calculate noise effect using our simple noise function
+                    const noiseValue = simpleNoise3d(
+                        originalX * 2 + time, 
+                        originalY * 2 + time, 
+                        originalZ * 2 + time
+                    ) * 0.2; // Increased effect
+                    
+                    // Add frequency effect
+                    let frequencyEffect = 0;
+                    if (lastNoteFrequency > 0) {
+                        // Higher notes make smaller, sharper distortions
+                        const normalizedFreq = Math.min(lastNoteFrequency / 800, 1);
+                        frequencyEffect = Math.sin(originalX * normalizedFreq * 10 + 
+                                                 originalY * normalizedFreq * 10 + 
+                                                 originalZ * normalizedFreq * 10 + time * 5) * 
+                                         blobIntensity * 0.4; // Increased effect
+                    }
+                    
+                    positions[i] = originalX * (1 + noiseValue + frequencyEffect + baseBeatEffect);
+                    positions[i + 1] = originalY * (1 + noiseValue + frequencyEffect + baseBeatEffect);
+                    positions[i + 2] = originalZ * (1 + noiseValue + frequencyEffect + baseBeatEffect);
+                }
+                
+                blobGeometry.attributes.position.needsUpdate = true;
+                
+                // More dramatic color changes
+                if (blobTargetColor) {
+                    blobMaterial.color.lerp(blobTargetColor, 0.15); // Faster color transition
+                    blobMaterial.emissive.lerp(blobTargetColor, 0.15);
+                    // Adjust emissive intensity based on blob intensity
+                    blobMaterial.emissiveIntensity = 0.3 + blobIntensity * 0.7;
+                }
+                
+                // Render the scene
+                renderer.render(scene, camera);
+            }
+            
+            // Render all pads
+            function render() {
+                // Always render the Three.js scene in every frame
+                updateBlob();
+                
+                // Then render the 2D canvas (which will be on top)
+                drawBackground();
+                pads.forEach(drawPad);
+                
+                requestAnimationFrame(render);
+            }
+            
+            // Start animation loop
+            render();
+            
+            // Animate ripples when pad is played
+            function createRipple(x, y, color) {
+                const ripple = document.createElement('div');
+                ripple.style.position = 'absolute';
+                ripple.style.borderRadius = '50%';
+                ripple.style.border = `2px solid ${color}`;
+                ripple.style.width = '0px';
+                ripple.style.height = '0px';
+                ripple.style.left = `${x}px`;
+                ripple.style.top = `${y}px`;
+                ripple.style.transform = 'translate(-50%, -50%)';
+                ripple.style.opacity = '0.8';
+                ripple.style.zIndex = '5';
+                document.getElementById('canvas-container').appendChild(ripple);
+                
+                anime({
+                    targets: ripple,
+                    width: '250px',
+                    height: '250px',
+                    opacity: 0,
+                    easing: 'easeOutExpo',
+                    duration: 1500,
+                    complete: function() {
+                        ripple.remove();
+                    }
+                });
+            }
+            
+            // Play sound for a pad
+            function playPad(pad) {
+                const now = Date.now();
+                if (now - pad.lastPlayed > 150) { // Debounce sound playing
+                    pad.active = true;
+                    pad.lastPlayed = now;
+                    
+                    // Resume audio context if suspended (needed for autoplay policy)
+                    if (audioContext.state === 'suspended') {
+                        audioContext.resume();
+                    }
+                    
+                    // Set the blob target color to the pad color
+                    blobTargetColor = pad.config.threeColor;
+                    
+                    // Make the blob more intense when playing a note
+                    blobIntensity = 1.0;
+                    lastNoteFrequency = noteFrequencies[pad.config.note];
+                    
+                    // Play the note
+                    playNote(pad.config.note, pad.config.soundType);
+                    
+                    // Create ripple animation at pad center
+                    const centerX = pad.x + pad.width / 2;
+                    const centerY = pad.y + pad.height / 2;
+                    createRipple(centerX, centerY, pad.config.color);
+                    
+                    // Reset active state after a short delay
+                    setTimeout(() => {
+                        pad.active = false;
+                    }, 200);
+                }
+            }
+            
+            // Find which pad was clicked/touched
+            function findPadAtPosition(x, y) {
+                return pads.find(pad => 
+                    x >= pad.x && 
+                    x <= pad.x + pad.width && 
+                    y >= pad.y && 
+                    y <= pad.y + pad.height
+                );
+            }
+            
+            // Setup Hammer.js for touch interactions
+            const hammertime = new Hammer(canvas);
+            hammertime.get('pan').set({ direction: Hammer.DIRECTION_ALL });
+            
+            // Handle tap event
+            hammertime.on('tap', function(ev) {
+                const pad = findPadAtPosition(ev.center.x, ev.center.y);
+                if (pad) {
+                    playPad(pad);
+                }
+            });
+            
+            // Handle pan event for continuous playing while dragging
+            hammertime.on('panmove', function(ev) {
+                const pad = findPadAtPosition(ev.center.x, ev.center.y);
+                if (pad) {
+                    playPad(pad);
+                }
+            });
+            
+            // Handle mouse events for desktop
+            canvas.addEventListener('mousedown', function(ev) {
+                const pad = findPadAtPosition(ev.clientX, ev.clientY);
+                if (pad) {
+                    playPad(pad);
+                }
+            });
+            
+            canvas.addEventListener('mousemove', function(ev) {
+                if (ev.buttons === 1) { // If mouse button is pressed
+                    const pad = findPadAtPosition(ev.clientX, ev.clientY);
+                    if (pad) {
+                        playPad(pad);
+                    }
+                }
+            });
+            
+            // Handle window resize
+            window.addEventListener('resize', function() {
+                // Update 2D canvas
+                canvas.width = window.innerWidth;
+                canvas.height = window.innerHeight;
+                
+                // Update THREE.js
+                camera.aspect = window.innerWidth / window.innerHeight;
+                camera.updateProjectionMatrix();
+                renderer.setSize(window.innerWidth, window.innerHeight);
+                
+                // Recalculate pad positions
+                const containerWidth = canvas.width * 0.95;
+                const containerHeight = canvas.height * 0.7;
+                
+                const padWidth = (containerWidth - (padding * (padsPerRow + 1))) / padsPerRow;
+                const padHeight = (containerHeight - (padding * (rows + 1))) / rows;
+                
+                const startX = (canvas.width - containerWidth) / 2 + padding;
+                const startY = (canvas.height - containerHeight) / 2 + padding;
+                
+                for (let row = 0; row < rows; row++) {
+                    for (let col = 0; col < padsPerRow; col++) {
+                        const index = row * padsPerRow + col;
+                        if (index < pads.length) {
+                            const x = startX + col * (padWidth + padding);
+                            const y = startY + row * (padHeight + padding);
+                            
+                            pads[index].x = x;
+                            pads[index].y = y;
+                            pads[index].width = padWidth;
+                            pads[index].height = padHeight;
+                        }
+                    }
+                }
+            });
+        });
+    </script>
+</body>
+</html>

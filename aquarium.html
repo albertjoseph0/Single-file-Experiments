@@ -1,0 +1,521 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Virtual Aquarium</title>
+    <style>
+        body {
+            margin: 0;
+            overflow: hidden;
+            background-color: #1a1a2e;
+        }
+        #aquarium {
+            display: block;
+            position: absolute;
+            top: 0;
+            left: 0;
+        }
+        #zdog-canvas {
+            position: absolute;
+            top: 0;
+            left: 0;
+            pointer-events: none;
+            z-index: 10;
+        }
+        #loading-message {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            color: white;
+            font-family: Arial, sans-serif;
+            font-size: 20px;
+            text-align: center;
+            z-index: 100;
+        }
+        #error-message {
+            position: absolute;
+            top: 20px;
+            left: 20px;
+            color: red;
+            font-family: Arial, sans-serif;
+            font-size: 16px;
+            background-color: rgba(0,0,0,0.5);
+            padding: 10px;
+            border-radius: 5px;
+            display: none;
+            z-index: 100;
+        }
+    </style>
+    <!-- Libraries -->
+    <script src="https://cdn.jsdelivr.net/npm/matter-js@0.18.0/build/matter.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/pixi.js@6.3.0/dist/browser/pixi.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/howler@2.2.3/dist/howler.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chance@1.1.9/dist/chance.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/zdog@1.1.3/dist/zdog.dist.min.js"></script>
+</head>
+<body>
+    <canvas id="aquarium"></canvas>
+    <canvas id="zdog-canvas"></canvas>
+    <div id="loading-message">Loading aquarium...</div>
+    <div id="error-message"></div>
+
+    <script>
+        // Error handling function
+        function showError(message) {
+            const errorElement = document.getElementById('error-message');
+            errorElement.style.display = 'block';
+            errorElement.textContent = message;
+            console.error(message);
+        }
+
+        // Check if libraries are loaded
+        if (typeof PIXI === 'undefined') {
+            showError('PIXI.js library failed to load. Please try refreshing the page.');
+        }
+        
+        // Hide loading message when everything is initialized
+        function hideLoading() {
+            document.getElementById('loading-message').style.display = 'none';
+        }
+        
+        // Initialize app when everything is ready
+        window.onload = function() {
+            try {
+                initAquarium();
+                hideLoading();
+            } catch (error) {
+                showError('Error initializing aquarium: ' + error.message);
+                console.error(error);
+            }
+        };
+        
+        // Main initialization function
+        function initAquarium() {
+            // Initialize random generator - fallback if Chance.js fails to load
+            const chance = typeof Chance !== 'undefined' ? new Chance() : {
+                floating: (opts) => Math.random() * (opts.max - opts.min) + opts.min,
+                integer: (opts) => Math.floor(Math.random() * (opts.max - opts.min + 1)) + opts.min,
+                bool: (opts) => Math.random() < (opts.likelihood || 50) / 100,
+                color: () => '#' + Math.floor(Math.random()*16777215).toString(16),
+                pickone: (arr) => arr[Math.floor(Math.random() * arr.length)]
+            };
+            
+            // Setup PIXI.js renderer
+            const app = new PIXI.Application({
+                view: document.getElementById('aquarium'),
+                width: window.innerWidth,
+                height: window.innerHeight,
+                backgroundColor: 0x0077be,
+                resolution: window.devicePixelRatio || 1,
+                autoDensity: true,
+            });
+            
+            // Create a gradient background
+            const bgGradient = new PIXI.Graphics();
+            bgGradient.beginFill(0x004466);
+            bgGradient.drawRect(0, 0, app.screen.width, app.screen.height);
+            bgGradient.endFill();
+            
+            // Add a light effect at the top
+            const lightEffect = new PIXI.Graphics();
+            lightEffect.beginFill(0x6af7ff, 0.1);
+            lightEffect.drawEllipse(app.screen.width / 2, -50, app.screen.width * 0.7, 150);
+            lightEffect.endFill();
+            
+            app.stage.addChild(bgGradient);
+            app.stage.addChild(lightEffect);
+            
+            // Setup Matter.js - only if it loaded successfully
+            let engine, world;
+            if (typeof Matter !== 'undefined') {
+                const Engine = Matter.Engine;
+                const World = Matter.World;
+                const Bodies = Matter.Bodies;
+                const Body = Matter.Body;
+                
+                // Create engine
+                engine = Engine.create({
+                    gravity: { x: 0, y: 0 }
+                });
+                world = engine.world;
+            }
+            
+            // Fish class
+            class Fish {
+                constructor(x, y) {
+                    // Randomize fish properties
+                    this.size = chance.floating({ min: 30, max: 80 });
+                    this.speed = chance.floating({ min: 0.5, max: 2 });
+                    this.color = chance.color({ format: 'hex' });
+                    this.direction = chance.floating({ min: -Math.PI, max: Math.PI });
+                    
+                    // Create fish sprite
+                    this.sprite = new PIXI.Graphics();
+                    this.sprite.beginFill(PIXI.utils.string2hex(this.color));
+                    
+                    // Draw fish body
+                    this.sprite.drawEllipse(0, 0, this.size, this.size / 2);
+                    
+                    // Draw tail
+                    this.sprite.beginFill(PIXI.utils.string2hex(this.color));
+                    this.sprite.moveTo(this.size * 0.8, 0);
+                    this.sprite.lineTo(this.size * 1.5, -this.size * 0.5);
+                    this.sprite.lineTo(this.size * 1.5, this.size * 0.5);
+                    this.sprite.lineTo(this.size * 0.8, 0);
+                    this.sprite.endFill();
+                    
+                    // Draw eye
+                    this.sprite.beginFill(0xFFFFFF);
+                    this.sprite.drawCircle(-this.size * 0.5, 0, this.size * 0.1);
+                    this.sprite.endFill();
+                    this.sprite.beginFill(0x000000);
+                    this.sprite.drawCircle(-this.size * 0.5, 0, this.size * 0.05);
+                    this.sprite.endFill();
+                    
+                    // Set position and add to stage
+                    this.sprite.x = x;
+                    this.sprite.y = y;
+                    app.stage.addChild(this.sprite);
+                    
+                    // If Matter.js is available, create physics body
+                    if (typeof Matter !== 'undefined') {
+                        this.body = Matter.Bodies.circle(x, y, this.size / 2, {
+                            frictionAir: 0.05,
+                            restitution: 0.3,
+                        });
+                        
+                        // Apply initial force
+                        Matter.Body.setVelocity(this.body, {
+                            x: Math.cos(this.direction) * this.speed,
+                            y: Math.sin(this.direction) * this.speed
+                        });
+                        
+                        Matter.World.add(world, this.body);
+                    } else {
+                        // Fallback if Matter.js isn't available
+                        this.position = { x, y };
+                        this.velocity = {
+                            x: Math.cos(this.direction) * this.speed,
+                            y: Math.sin(this.direction) * this.speed
+                        };
+                        this.angle = this.direction;
+                    }
+                }
+                
+                update() {
+                    if (typeof Matter !== 'undefined' && this.body) {
+                        // Update sprite position and rotation using Matter.js
+                        this.sprite.x = this.body.position.x;
+                        this.sprite.y = this.body.position.y;
+                        
+                        const velocity = this.body.velocity;
+                        const speed = Math.sqrt(velocity.x * velocity.x + velocity.y * velocity.y);
+                        
+                        // Change direction randomly
+                        if (chance.bool({ likelihood: 1 })) {
+                            const newAngle = chance.floating({ min: -0.2, max: 0.2 });
+                            Matter.Body.setAngle(this.body, this.body.angle + newAngle);
+                            Matter.Body.setVelocity(this.body, {
+                                x: Math.cos(this.body.angle) * this.speed,
+                                y: Math.sin(this.body.angle) * this.speed
+                            });
+                        }
+                        
+                        // Bounce from walls
+                        const bounds = {
+                            min: this.size,
+                            maxX: app.screen.width - this.size,
+                            maxY: app.screen.height - this.size
+                        };
+                        
+                        if (this.body.position.x < bounds.min || this.body.position.x > bounds.maxX) {
+                            Matter.Body.setVelocity(this.body, {
+                                x: -velocity.x,
+                                y: velocity.y
+                            });
+                        }
+                        
+                        if (this.body.position.y < bounds.min || this.body.position.y > bounds.maxY) {
+                            Matter.Body.setVelocity(this.body, {
+                                x: velocity.x,
+                                y: -velocity.y
+                            });
+                        }
+                        
+                        // Update sprite rotation based on velocity
+                        if (velocity.x !== 0) {
+                            this.sprite.scale.x = velocity.x > 0 ? -1 : 1;
+                            this.sprite.rotation = Math.atan2(velocity.y, Math.abs(velocity.x));
+                        }
+                    } else {
+                        // Fallback movement logic if Matter.js isn't available
+                        this.position.x += this.velocity.x;
+                        this.position.y += this.velocity.y;
+                        
+                        // Simple direction change
+                        if (chance.bool({ likelihood: 1 })) {
+                            const newAngle = chance.floating({ min: -0.2, max: 0.2 });
+                            this.angle += newAngle;
+                            this.velocity.x = Math.cos(this.angle) * this.speed;
+                            this.velocity.y = Math.sin(this.angle) * this.speed;
+                        }
+                        
+                        // Bounce from walls
+                        const bounds = {
+                            min: this.size,
+                            maxX: app.screen.width - this.size,
+                            maxY: app.screen.height - this.size
+                        };
+                        
+                        if (this.position.x < bounds.min || this.position.x > bounds.maxX) {
+                            this.velocity.x = -this.velocity.x;
+                        }
+                        
+                        if (this.position.y < bounds.min || this.position.y > bounds.maxY) {
+                            this.velocity.y = -this.velocity.y;
+                        }
+                        
+                        // Update sprite position and rotation
+                        this.sprite.x = this.position.x;
+                        this.sprite.y = this.position.y;
+                        
+                        if (this.velocity.x !== 0) {
+                            this.sprite.scale.x = this.velocity.x > 0 ? -1 : 1;
+                            this.sprite.rotation = Math.atan2(this.velocity.y, Math.abs(this.velocity.x));
+                        }
+                    }
+                }
+            }
+            
+            // Create bubbles
+            class Bubble {
+                constructor() {
+                    this.size = chance.floating({ min: 5, max: 15 });
+                    this.x = chance.integer({ min: 0, max: app.screen.width });
+                    this.y = app.screen.height + this.size;
+                    this.speed = chance.floating({ min: 0.5, max: 2 });
+                    
+                    this.sprite = new PIXI.Graphics();
+                    this.sprite.beginFill(0xFFFFFF, 0.4);
+                    this.sprite.drawCircle(0, 0, this.size);
+                    this.sprite.endFill();
+                    
+                    this.sprite.x = this.x;
+                    this.sprite.y = this.y;
+                    app.stage.addChild(this.sprite);
+                }
+                
+                update() {
+                    this.y -= this.speed;
+                    this.x += Math.sin(this.y * 0.05) * 0.5;
+                    
+                    this.sprite.x = this.x;
+                    this.sprite.y = this.y;
+                    
+                    // Remove if out of screen
+                    if (this.y < -this.size) {
+                        app.stage.removeChild(this.sprite);
+                        return false;
+                    }
+                    return true;
+                }
+            }
+            
+            // Create fishes
+            const fishes = [];
+            const numFish = chance.integer({ min: 10, max: 15 });
+            
+            for (let i = 0; i < numFish; i++) {
+                const x = chance.integer({ min: 100, max: app.screen.width - 100 });
+                const y = chance.integer({ min: 100, max: app.screen.height - 100 });
+                fishes.push(new Fish(x, y));
+            }
+            
+            // Create bubbles
+            let bubbles = [];
+            
+            // Setup Zdog for 3D decorations - only if available
+            let illo;
+            
+            if (typeof Zdog !== 'undefined') {
+                const zdogCanvas = document.getElementById('zdog-canvas');
+                zdogCanvas.width = window.innerWidth;
+                zdogCanvas.height = window.innerHeight;
+                
+                illo = new Zdog.Illustration({
+                    element: zdogCanvas,
+                    dragRotate: false,
+                });
+                
+                // Add plants
+                function createPlant(x, y, height, color) {
+                    const plant = new Zdog.Group({
+                        addTo: illo,
+                        translate: { x, y, z: 0 },
+                    });
+                    
+                    new Zdog.Shape({
+                        addTo: plant,
+                        path: [
+                            { y: 0 },
+                            { y: -height },
+                        ],
+                        stroke: 10,
+                        color: color,
+                    });
+                    
+                    const numLeaves = chance.integer({ min: 3, max: 6 });
+                    for (let i = 0; i < numLeaves; i++) {
+                        const leafHeight = height * (i / numLeaves);
+                        new Zdog.Ellipse({
+                            addTo: plant,
+                            diameter: 40,
+                            quarters: 2,
+                            translate: { y: -leafHeight },
+                            rotate: { z: chance.floating({ min: -Math.PI/4, max: Math.PI/4 }) },
+                            stroke: 5,
+                            color: color,
+                        });
+                    }
+                    
+                    return plant;
+                }
+                
+                // Add rocks
+                function createRock(x, y, size, color) {
+                    return new Zdog.Shape({
+                        addTo: illo,
+                        stroke: size,
+                        color: color,
+                        translate: { x, y, z: 20 },
+                    });
+                }
+                
+                // Create plants and rocks
+                const numPlants = chance.integer({ min: 5, max: 10 });
+                
+                for (let i = 0; i < numPlants; i++) {
+                    const x = chance.integer({ min: -app.screen.width/2 + 50, max: app.screen.width/2 - 50 });
+                    const y = app.screen.height/2 - 30;
+                    const height = chance.integer({ min: 100, max: 200 });
+                    const color = chance.pickone(['#2a9d8f', '#43aa8b', '#4d908e', '#277da1']);
+                    
+                    createPlant(x, y, height, color);
+                }
+                
+                const numRocks = chance.integer({ min: 3, max: 8 });
+                
+                for (let i = 0; i < numRocks; i++) {
+                    const x = chance.integer({ min: -app.screen.width/2 + 50, max: app.screen.width/2 - 50 });
+                    const y = app.screen.height/2 - 20;
+                    const size = chance.integer({ min: 15, max: 40 });
+                    const color = chance.pickone(['#6d6875', '#b5838d', '#a4a4a4', '#8d8d8d']);
+                    
+                    createRock(x, y, size, color);
+                }
+                
+                // Center Zdog scene
+                illo.translate.x = app.screen.width / 2;
+                illo.translate.y = app.screen.height / 2;
+            }
+            
+            // Setup sounds
+            let sounds = {};
+            
+            if (typeof Howl !== 'undefined') {
+                sounds = {
+                    bubbles: new Howl({
+                        src: [
+                            'https://cdn.pixabay.com/download/audio/2022/03/10/audio_fd8e5298a1.mp3?filename=underwater-bubbles-111789.mp3',
+                            'https://freesound.org/data/previews/267/267583_4889011-lq.mp3'
+                        ],
+                        loop: true,
+                        volume: 0.3,
+                        onloaderror: function() {
+                            console.warn('Bubble sound failed to load');
+                        }
+                    }),
+                    ambience: new Howl({
+                        src: [
+                            'https://cdn.pixabay.com/download/audio/2022/11/17/audio_e13e3e1a78.mp3?filename=underwater-ambience-with-deep-bubbles-144285.mp3',
+                            'https://freesound.org/data/previews/451/451470_8941843-lq.mp3'
+                        ],
+                        loop: true,
+                        volume: 0.2,
+                        onloaderror: function() {
+                            console.warn('Ambience sound failed to load');
+                        }
+                    })
+                };
+                
+                // Play sounds
+                sounds.bubbles.play();
+                sounds.ambience.play();
+            }
+            
+            // Animation loop
+            let lastTime = 0;
+            function animate(timestamp) {
+                const deltaTime = timestamp - lastTime;
+                lastTime = timestamp;
+                
+                // Update physics if Matter.js is available
+                if (typeof Matter !== 'undefined' && engine) {
+                    Matter.Engine.update(engine, deltaTime);
+                }
+                
+                // Update fishes
+                fishes.forEach(fish => fish.update());
+                
+                // Update bubbles
+                bubbles = bubbles.filter(bubble => bubble.update());
+                
+                // Add new bubbles randomly
+                if (chance.bool({ likelihood: 5 })) {
+                    bubbles.push(new Bubble());
+                }
+                
+                // Update Zdog scene if available
+                if (illo) {
+                    illo.updateRenderGraph();
+                }
+                
+                requestAnimationFrame(animate);
+            }
+            
+            animate(0);
+            
+            // Handle window resize
+            window.addEventListener('resize', () => {
+                app.renderer.resize(window.innerWidth, window.innerHeight);
+                
+                // Update background
+                bgGradient.clear();
+                bgGradient.beginFill(0x004466);
+                bgGradient.drawRect(0, 0, app.screen.width, app.screen.height);
+                bgGradient.endFill();
+                
+                // Update light effect
+                lightEffect.clear();
+                lightEffect.beginFill(0x6af7ff, 0.1);
+                lightEffect.drawEllipse(app.screen.width / 2, -50, app.screen.width * 0.7, 150);
+                lightEffect.endFill();
+                
+                // Update Zdog canvas if available
+                if (typeof Zdog !== 'undefined' && document.getElementById('zdog-canvas')) {
+                    const zdogCanvas = document.getElementById('zdog-canvas');
+                    zdogCanvas.width = window.innerWidth;
+                    zdogCanvas.height = window.innerHeight;
+                    
+                    if (illo) {
+                        illo.translate.x = app.screen.width / 2;
+                        illo.translate.y = app.screen.height / 2;
+                    }
+                }
+            });
+        }
+    </script>
+</body>
+</html> 
